@@ -457,6 +457,13 @@ export async function runManagementCycle({ silent = false } = {}) {
       if (act.action === "CLOSE" && act.rule && act.rule !== "exit")
         line += `\nRule ${act.rule}: ${act.reason}`;
       if (act.action === "CLAIM") line += `\n→ Claiming fees`;
+      // Rule proximity for positions >= 60min (informational only)
+      if (act.action === "STAY" && (p.age_minutes ?? 0) >= 60) {
+        const tracked = getTrackedPosition(p.position);
+        const closestRules = getClosestRule(p, config.management, tracked);
+        const proximityText = formatClosestRule(closestRules);
+        if (proximityText) line += `\n📍 ${proximityText}`;
+      }
       return line;
     });
 
@@ -1353,6 +1360,124 @@ function getDeterministicCloseRule(position, managementConfig, poolData = null) 
   }
 
   return null;
+}
+
+/**
+ * Compute proximity to each deterministic close rule.
+ * Returns sorted array: [{rule, distance, label, atRisk}] — nearest first.
+ * distance = how far from triggering (negative = already past threshold).
+ * atRisk = true if distance <= 0 or within 30% of threshold.
+ */
+function getClosestRule(position, managementConfig, tracked = null) {
+  const rules = [];
+  const pnlPct = Number(position.pnl_pct ?? 0);
+  const ageMin = Number(position.age_minutes ?? 0);
+  const peakPnl = Number(tracked?.peak_pnl_pct ?? position.peak_pnl_pct ?? 0);
+  const feesUsd = Number(position.unclaimed_fees_true_usd ?? position.unclaimed_fees_usd ?? 0);
+  const pnlUsd = Number(position.pnl_true_usd ?? position.pnl_usd ?? 0);
+
+  // Rule 1: Stop loss
+  if (managementConfig.stopLossPct != null) {
+    const dist = pnlPct - managementConfig.stopLossPct;
+    rules.push({ rule: 1, distance: dist, label: "Stop Loss", atRisk: dist <= Math.abs(managementConfig.stopLossPct) * 0.3 });
+  }
+
+  // Rule 2: Take profit
+  if (managementConfig.takeProfitPct != null) {
+    const dist = managementConfig.takeProfitPct - pnlPct;
+    rules.push({ rule: 2, distance: dist, label: "Take Profit", atRisk: dist <= managementConfig.takeProfitPct * 0.3 });
+  }
+
+  // Rule 3: Pumped far above range
+  if (position.active_bin != null && position.upper_bin != null) {
+    const threshold = managementConfig.outOfRangeBinsToClose ?? 10;
+    const binsAbove = position.active_bin - position.upper_bin;
+    if (binsAbove > 0) {
+      // Already above range: gap to instant close
+      const dist = threshold - binsAbove;
+      rules.push({ rule: 3, distance: dist, label: "Pumped Above Range", atRisk: dist <= threshold * 0.3 });
+    } else {
+      // Still in range: distance to upper_bin + threshold
+      const dist = Math.abs(binsAbove) + threshold;
+      rules.push({ rule: 3, distance: dist, label: "Pumped Above Range", atRisk: false });
+    }
+  }
+
+  // Rule 4: OOR timer (above-range only)
+  if (position.active_bin != null && position.upper_bin != null && position.active_bin > position.upper_bin) {
+    const oorMin = position.minutes_out_of_range ?? 0;
+    const threshold = managementConfig.outOfRangeWaitMinutes ?? 30;
+    const dist = threshold - oorMin;
+    rules.push({ rule: 4, distance: dist, label: "OOR Timer", atRisk: dist <= threshold * 0.3 });
+  }
+
+  // Rule 5: Low yield
+  if (position.fee_per_tvl_24h != null && ageMin >= 60) {
+    const threshold = managementConfig.minFeePerTvl24h ?? 7;
+    const dist = position.fee_per_tvl_24h - threshold;
+    rules.push({ rule: 5, distance: dist, label: "Low Yield", atRisk: dist <= threshold * 0.3 });
+  }
+
+  // Rule 6: Fee-decay exit (AND condition: use max of gaps)
+  if (managementConfig.feeDecayExitEnabled) {
+    const ageThreshold = managementConfig.feeDecayExitAgeMinutes ?? 180;
+    const pnlThreshold = managementConfig.feeDecayExitPnlPct ?? -5;
+    const ageDist = ageThreshold - ageMin;
+    const pnlDist = pnlPct - pnlThreshold;
+    const dist = Math.max(ageDist, pnlDist);
+    rules.push({ rule: 6, distance: dist, label: "Fee-Decay Exit", atRisk: dist <= 30 });
+  }
+
+  // Rule 7: Profit-decay exit
+  if (managementConfig.profitDecayExitEnabled) {
+    const ageThreshold = managementConfig.profitDecayExitAgeMinutes ?? 180;
+    const dist = ageThreshold - ageMin;
+    rules.push({ rule: 7, distance: dist, label: "Profit-Decay Exit", atRisk: dist <= 30 });
+  }
+
+  // Rule 8: Dead-flow exit (partial — pool data not available here)
+  if (managementConfig.deadFlowExitEnabled) {
+    const ageThreshold = managementConfig.deadFlowExitAgeMinutes ?? 180;
+    const dist = ageThreshold - ageMin;
+    rules.push({ rule: 8, distance: dist, label: "Dead-Flow Exit", atRisk: dist <= 30 });
+  }
+
+  // Trailing TP
+  if (managementConfig.trailingTakeProfit) {
+    if (tracked?.trailing_active) {
+      const dropFromPeak = peakPnl - pnlPct;
+      const dist = (managementConfig.trailingDropPct ?? 1.5) - dropFromPeak;
+      rules.push({ rule: "T", distance: dist, label: "Trailing TP", atRisk: dist <= 0.5 });
+    } else {
+      const dist = (managementConfig.trailingTriggerPct ?? 3) - peakPnl;
+      if (dist > 0) {
+        rules.push({ rule: "T", distance: dist, label: "Trailing TP (inactive)", atRisk: dist <= 1 });
+      }
+    }
+  }
+
+  rules.sort((a, b) => a.distance - b.distance);
+  return rules;
+}
+
+/**
+ * Format closest rule for display.
+ * Shows the nearest rule and optionally others at risk.
+ */
+function formatClosestRule(rules) {
+  if (!rules || rules.length === 0) return null;
+  const nearest = rules[0];
+  const atRisk = rules.filter(r => r.atRisk && r !== nearest);
+  let text = `Nearest: ${nearest.label}`;
+  if (nearest.distance <= 0) {
+    text += " (TRIGGERED)";
+  } else {
+    text += ` (gap: ${nearest.distance.toFixed(2)})`;
+  }
+  if (atRisk.length > 0) {
+    text += ` | Also at risk: ${atRisk.map(r => r.label).join(", ")}`;
+  }
+  return text;
 }
 
 // ═══════════════════════════════════════════
