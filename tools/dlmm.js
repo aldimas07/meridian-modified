@@ -1267,7 +1267,9 @@ export async function getMyPositions({ force = false, silent = false } = {}) {
             : binData
             ? Math.round((parseFloat(binData.unrealizedPnl?.unclaimedFeeTokenX?.usd || 0) + parseFloat(binData.unrealizedPnl?.unclaimedFeeTokenY?.usd || 0)) * 10000) / 10000
             : null,
-          fee_per_tvl_24h:    binData
+          fee_per_tvl_24h:    lpData
+            ? Math.round(parseFloat(lpData.fee_per_tvl_24h || lpData.feePerTvl24h || 0) * 100) / 100
+            : binData
             ? Math.round(parseFloat(binData.feePerTvl24h || 0) * 100) / 100
             : null,
           age_minutes:        binData?.createdAt ? Math.floor((Date.now() - binData.createdAt * 1000) / 60000) : ageFromState,
