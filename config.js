@@ -135,6 +135,13 @@ export const config = {
     profitDecayExitAgeMinutes:  u.profitDecayExitAgeMinutes  ?? 180,
     profitDecayExitPeakPct:     u.profitDecayExitPeakPct     ?? 2,
     profitDecayExitDropPct:     u.profitDecayExitDropPct     ?? 1.5,
+    // Dead-flow exit — close if pool volume/activity collapses while in-range
+    deadFlowExitEnabled:        u.deadFlowExitEnabled        ?? false,
+    deadFlowExitAgeMinutes:     u.deadFlowExitAgeMinutes     ?? 180,
+    deadFlowExitUnclaimedUsd:   u.deadFlowExitUnclaimedUsd   ?? 0.10,
+    deadFlowExitVolume:         u.deadFlowExitVolume         ?? 500,
+    deadFlowExitFeeTvlRatio:    u.deadFlowExitFeeTvlRatio    ?? 0.05,
+    deadFlowExitTimeframe:      u.deadFlowExitTimeframe      ?? "30m",
   },
 
   // ─── Strategy Mapping ───────────────────

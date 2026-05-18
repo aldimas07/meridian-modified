@@ -7,7 +7,7 @@ import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
-import { getTopCandidates } from "./tools/screening.js";
+import { getTopCandidates, getPoolDetail } from "./tools/screening.js";
 import {
   config,
   reloadScreeningThresholds,
@@ -354,6 +354,23 @@ export async function runManagementCycle({ silent = false } = {}) {
       if (closeRule) {
         actionMap.set(p.position, closeRule);
         continue;
+      }
+
+      // Rule 8: Dead-flow exit — fetch real-time pool data only when Rule 1-7 passed
+      if (config.management.deadFlowExitEnabled) {
+        try {
+          const poolDetail = await getPoolDetail({
+            pool_address: p.pool,
+            timeframe: config.management.deadFlowExitTimeframe || "30m",
+          });
+          const deadFlowRule = getDeterministicCloseRule(p, config.management, poolDetail);
+          if (deadFlowRule) {
+            actionMap.set(p.position, deadFlowRule);
+            continue;
+          }
+        } catch (e) {
+          log("management_warn", `Dead-flow pool fetch failed for ${p.pair}: ${e.message}`);
+        }
       }
       const claimableUsd =
         p.unclaimed_fees_true_usd ?? p.unclaimed_fees_usd ?? 0;
@@ -1196,7 +1213,7 @@ function formatCandidates(candidates) {
   ].join("\n");
 }
 
-function getDeterministicCloseRule(position, managementConfig) {
+function getDeterministicCloseRule(position, managementConfig, poolData = null) {
   const tracked = getTrackedPosition(position.position);
   const pnlSuspect = (() => {
     if (position.pnl_pct == null) return false;
@@ -1287,6 +1304,30 @@ function getDeterministicCloseRule(position, managementConfig) {
       reason: `profit decay: PnL ${pnlPct.toFixed(2)}% dropped ${(peakPnlPct - pnlPct).toFixed(2)}% from peak ${peakPnlPct.toFixed(2)}%`,
     };
   }
+
+  // Rule 8: Dead-flow exit — pool volume/activity collapsed while in-range
+  if (
+    poolData &&
+    managementConfig.deadFlowExitEnabled &&
+    position.in_range === true &&
+    ageMinutes >= (managementConfig.deadFlowExitAgeMinutes ?? 180) &&
+    feesUsd < (managementConfig.deadFlowExitUnclaimedUsd ?? 0.10) &&
+    pnlPct > 0
+  ) {
+    const poolVolume = Number(poolData.volume_window ?? poolData.volume ?? 0);
+    const poolFeeTvl = Number(poolData.fee_active_tvl_ratio ?? 0);
+    const volThreshold = managementConfig.deadFlowExitVolume ?? 500;
+    const feeTvlThreshold = managementConfig.deadFlowExitFeeTvlRatio ?? 0.05;
+
+    if (poolVolume < volThreshold && poolFeeTvl < feeTvlThreshold) {
+      return {
+        action: "CLOSE",
+        rule: 8,
+        reason: `dead flow: vol=$${poolVolume.toFixed(0)} (<$${volThreshold}), fee/TVL=${poolFeeTvl.toFixed(4)} (<${feeTvlThreshold}), PnL ${pnlPct.toFixed(2)}%`,
+      };
+    }
+  }
+
   return null;
 }
 
@@ -1356,6 +1397,7 @@ function formatConfigSnapshot() {
     `OOR: ${config.management.outOfRangeWaitMinutes}m | cooldown ${config.management.oorCooldownTriggerCount}x / ${config.management.oorCooldownHours}h`,
     `Repeat deploy cooldown: ${config.management.repeatDeployCooldownEnabled ? "on" : "off"} | ${config.management.repeatDeployCooldownTriggerCount}x / ${config.management.repeatDeployCooldownHours}h | min fee earned ${config.management.repeatDeployCooldownMinFeeEarnedPct}% | ${config.management.repeatDeployCooldownScope}`,
     `Yield floor: ${config.management.minFeePerTvl24h}% | min age ${config.management.minAgeBeforeYieldCheck}m`,
+    `Dead-flow: ${config.management.deadFlowExitEnabled ? "on" : "off"} | vol<$${config.management.deadFlowExitVolume} fee/TVL<${config.management.deadFlowExitFeeTvlRatio} | ${config.management.deadFlowExitTimeframe} | age>=${config.management.deadFlowExitAgeMinutes}m`,
     `Screening: ${config.screening.category} / ${config.screening.timeframe} | TVL ${config.screening.minTvl}-${config.screening.maxTvl}`,
     `Intervals: manage ${config.schedule.managementIntervalMin}m | screen ${config.schedule.screeningIntervalMin}m`,
     `HiveMind: ${isHiveMindEnabled() ? "enabled" : "disabled"}${config.hiveMind.agentId ? ` | ${config.hiveMind.agentId}` : ""}`,
