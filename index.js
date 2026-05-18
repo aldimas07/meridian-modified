@@ -449,7 +449,7 @@ export async function runManagementCycle({ silent = false } = {}) {
       const statusLabel =
         act.action === "INSTRUCTION" ? "HOLD (instruction)" : act.action;
       const binBar = formatBinProgress(p.lower_bin, p.upper_bin, p.active_bin, 20);
-      let line = `**${p.pair}** | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
+      let line = `${p.pair} | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
       if (binBar) line += `\nBin: ${binBar}`;
       if (p.instruction) line += `\nNote: "${p.instruction}"`;
       if (act.action === "CLOSE" && act.rule === "exit")
