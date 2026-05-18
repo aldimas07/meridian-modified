@@ -104,6 +104,28 @@ function formatCountdown(seconds) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+/**
+ * Renders a bin progress bar showing where active_bin sits within [lower_bin, upper_bin].
+ * Example: [████████████░░░░░░░░] 60%
+ * Returns null if bin data is missing.
+ */
+function formatBinProgress(lowerBin, upperBin, activeBin, width = 20) {
+  if (lowerBin == null || upperBin == null || activeBin == null) return null;
+  const totalBins = upperBin - lowerBin;
+  if (totalBins <= 0) return null;
+
+  const rawPct = ((activeBin - lowerBin) / totalBins) * 100;
+  const clamped = Math.max(0, Math.min(100, rawPct));
+  const filled = Math.round((clamped / 100) * width);
+  const empty = width - filled;
+
+  const bar = "\u2588".repeat(filled) + "\u2591".repeat(empty);
+  const pctStr = Math.round(rawPct) + "%";
+  const oor = rawPct < 0 ? " \u25B6" : rawPct > 100 ? " \u25C0" : "";
+
+  return `[${bar}] ${pctStr}${oor}`;
+}
+
 function buildPrompt() {
   const mgmt = formatCountdown(
     nextRunIn(timers.managementLastRun, config.schedule.managementIntervalMin),
@@ -426,7 +448,9 @@ export async function runManagementCycle({ silent = false } = {}) {
         : `$${p.unclaimed_fees_usd ?? "?"}`;
       const statusLabel =
         act.action === "INSTRUCTION" ? "HOLD (instruction)" : act.action;
+      const binBar = formatBinProgress(p.lower_bin, p.upper_bin, p.active_bin, 20);
       let line = `**${p.pair}** | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
+      if (binBar) line += `\nBin: ${binBar}`;
       if (p.instruction) line += `\nNote: "${p.instruction}"`;
       if (act.action === "CLOSE" && act.rule === "exit")
         line += `\n⚡ Trailing TP: ${act.reason}`;
@@ -1937,7 +1961,9 @@ async function telegramHandler(msg) {
             : `-${cur}${Math.abs(p.pnl_usd)}`;
         const age = p.age_minutes != null ? `${p.age_minutes}m` : "?";
         const oor = !p.in_range ? " ⚠️OOR" : "";
-        return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
+        const bar = formatBinProgress(p.lower_bin, p.upper_bin, p.active_bin, 15);
+        const barStr = bar ? ` | ${bar}` : "";
+        return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}${barStr}`;
       });
       await sendMessage(
         `📊 Open Positions (${total_positions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`,
@@ -1958,12 +1984,14 @@ async function telegramHandler(msg) {
         return;
       }
       const pos = positions[idx];
+      const binBar = formatBinProgress(pos.lower_bin, pos.upper_bin, pos.active_bin, 20);
       await sendMessage(
         [
           `${idx + 1}. ${pos.pair}`,
           `Pool: ${pos.pool}`,
           `Position: ${pos.position}`,
           `Range: ${pos.lower_bin} → ${pos.upper_bin} | active ${pos.active_bin}`,
+          binBar ? `Bin: ${binBar}` : null,
           `PnL: ${pos.pnl_pct ?? "?"}% | fees: ${config.management.solMode ? "◎" : "$"}${pos.unclaimed_fees_usd ?? "?"}`,
           `Value: ${config.management.solMode ? "◎" : "$"}${pos.total_value_usd ?? "?"}`,
           `Age: ${pos.age_minutes ?? "?"}m | ${pos.in_range ? "IN RANGE" : `OOR ${pos.minutes_out_of_range ?? 0}m`}`,
