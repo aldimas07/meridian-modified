@@ -601,6 +601,82 @@ discord-listener/
 
 ---
 
+## Modifications from Original
+
+This fork (`meridian-modified`) adds the following features on top of the original Meridian repo:
+
+### 1. Bin Progress Bar (Visual Range Indicator)
+
+Every position display now includes a visual progress bar showing where the active bin sits within the [lower_bin, upper_bin] range:
+
+```
+Bin: [████████████░░░░░░░░] 60%
+```
+
+- `█` = filled (in-range bins below active)
+- `░` = empty (in-range bins above active)
+- `▶` indicator when active bin is below range (OOR downside)
+- `◀` indicator when active bin is above range (OOR upside)
+
+Appears in:
+- Management cycle Telegram reports
+- `/positions` Telegram command
+- `/close <n>` detail view
+
+### 2. Rule 8: Dead-Flow Exit
+
+Closes profitable in-range positions when the pool's volume and fee/TVL activity collapse. Prevents holding positions that earn nothing while capital sits idle.
+
+**Trigger conditions (all must be true):**
+- Position age >= `deadFlowExitAgeMinutes` (default: 180 min)
+- Position is in-range
+- Unclaimed fees < `deadFlowExitUnclaimedUsd` (default: $0.10)
+- Floating PnL > 0%
+- Pool volume < `deadFlowExitVolume` (default: $500)
+- Pool fee/active-TVL < `deadFlowExitFeeTvlRatio` (default: 0.05)
+
+**Config keys** (add to `user-config.json`):
+
+| Field | Default | Description |
+|---|---|---|
+| `deadFlowExitEnabled` | `false` | Enable/disable dead-flow exit rule |
+| `deadFlowExitAgeMinutes` | `180` | Minimum position age before rule applies |
+| `deadFlowExitUnclaimedUsd` | `0.10` | Max unclaimed fees to consider "near zero" |
+| `deadFlowExitVolume` | `500` | Pool volume threshold (USD) |
+| `deadFlowExitFeeTvlRatio` | `0.05` | Fee/active-TVL ratio threshold |
+| `deadFlowExitTimeframe` | `30m` | Pool discovery timeframe for fresh data |
+
+**Case study:** CATCOIN-SOL position was profitable after a fee claim, but pool flow collapsed to near zero. Existing TP/trailing/OOR rules kept holding with nothing left to earn. This rule closes such positions to free capital for better opportunities.
+
+### 3. Rule Proximity Detection
+
+For positions open >= 60 minutes, the management cycle automatically computes proximity to every deterministic close rule and displays the nearest one in the Telegram report. Zero token cost — pure JavaScript, no LLM call added.
+
+**Example output:**
+```
+**BABYTROLL-SOL** | Age: 65m | Val: $0.52 | ...
+📍 Nearest: Low Yield (gap: 0.50) | Also at risk: Trailing TP (inactive)
+```
+
+**Rules tracked:**
+- Rule 1: Stop Loss
+- Rule 2: Take Profit
+- Rule 3: Pumped Above Range
+- Rule 4: OOR Timer
+- Rule 5: Low Yield
+- Rule 6: Fee-Decay Exit
+- Rule 7: Profit-Decay Exit
+- Rule 8: Dead-Flow Exit
+- Trailing TP (active + inactive)
+
+**Proximity scoring:**
+- `distance` = how far from triggering (negative = already past threshold)
+- `atRisk` = true when distance <= 30% of threshold
+- AND-condition rules (fee-decay, profit-decay) use `max()` of component gaps
+- Trailing TP shows different states: inactive (gap to trigger) vs active (gap to drop)
+
+---
+
 ## Disclaimer
 
 This software is provided as-is, with no warranty. Running an autonomous trading agent carries real financial risk — you can lose funds. Always start with `DRY_RUN=true` to verify behavior before going live. Never deploy more capital than you can afford to lose. This is not financial advice.
