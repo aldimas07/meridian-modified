@@ -47,6 +47,7 @@ import {
   addPoolNote,
 } from "./pool-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
+import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
@@ -660,7 +661,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     );
   }
   timers.screeningLastRun = Date.now();
-  log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
+  log("cron", `Starting screening cycle [source: ${config.screening.source || "meteora"} | model: ${config.llm.screeningModel}]`);
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
@@ -686,6 +687,13 @@ export async function runScreeningCycle({ silent = false } = {}) {
       []
     ).slice(0, 10);
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
+    const gmgnStageCounts = topCandidates?.stage_counts ?? null;
+    const gmgnAllFiltered = topCandidates?.all_filtered ?? [];
+
+    if (gmgnStageCounts) {
+      const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
+      if (funnelBlock) log("screening", `GMGN funnel:\n${funnelBlock}`);
+    }
 
     const allCandidates = [];
     for (const pool of candidates) {
@@ -861,32 +869,50 @@ export async function runScreeningCycle({ silent = false } = {}) {
         ? `  pvp: HIGH — rival ${pool.pvp_rival_name || pool.pvp_symbol} (${pool.pvp_rival_mint?.slice(0, 8)}...) has pool ${pool.pvp_rival_pool?.slice(0, 8)}..., tvl=$${pool.pvp_rival_tvl}, holders=${pool.pvp_rival_holders}, fees=${pool.pvp_rival_fees}SOL`
         : null;
 
-      const block = [
-        `POOL: ${pool.name} (${pool.pool})`,
-        `  metrics: bin_step=${pool.bin_step}, fee_pct=${pool.fee_pct}%, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.tvl ?? pool.active_tvl}, volatility_${pool.volatility_timeframe || "30m"}=${pool.volatility}, mcap=$${pool.mcap}, organic=${pool.organic_score}${pool.token_age_hours != null ? `, age=${pool.token_age_hours}h` : ""}`,
-        `  audit: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
-        pvpLine,
-        okxParts
-          ? `  okx: ${okxParts}`
-          : okxUnavailable
-            ? `  okx: unavailable`
+      let block;
+      if (pool.gmgn) {
+        block = [
+          `POOL: ${pool.name} (${pool.pool})`,
+          formatGmgnCandidateForPrompt(pool),
+          pvpLine,
+          `  smart_wallets: ${Math.max(sw?.in_pool?.length ?? 0, Number(pool.gmgn_smart_wallets ?? 0))} present${sw?.in_pool?.length ? ` → CONFIDENCE BOOST (${sw.in_pool.map((w) => w.name).join(", ")})` : ""}`,
+          activeBin != null ? `  active_bin: ${activeBin}` : null,
+          n?.narrative
+            ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}`
+            : `  narrative_untrusted: none`,
+          mem
+            ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}`
             : null,
-        okxTags ? `  tags: ${okxTags}` : null,
-        pool.price_vs_ath_pct != null
-          ? `  ath: price_vs_ath=${pool.price_vs_ath_pct}%${pool.top_cluster_trend ? `, top_cluster=${pool.top_cluster_trend}` : ""}`
-          : null,
-        `  smart_wallets: ${sw?.in_pool?.length ?? 0} present${sw?.in_pool?.length ? ` → CONFIDENCE BOOST (${sw.in_pool.map((w) => w.name).join(", ")})` : ""}`,
-        activeBin != null ? `  active_bin: ${activeBin}` : null,
-        priceChange != null
-          ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}`
-          : null,
-        n?.narrative
-          ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}`
-          : `  narrative_untrusted: none`,
-        mem
-          ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}`
-          : null,
-      ]
+        ];
+      } else {
+        block = [
+          `POOL: ${pool.name} (${pool.pool})`,
+          `  metrics: bin_step=${pool.bin_step}, fee_pct=${pool.fee_pct}%, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.tvl ?? pool.active_tvl}, volatility_${pool.volatility_timeframe || "30m"}=${pool.volatility}, mcap=$${pool.mcap}, organic=${pool.organic_score}${pool.token_age_hours != null ? `, age=${pool.token_age_hours}h` : ""}`,
+          `  audit: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
+          pvpLine,
+          okxParts
+            ? `  okx: ${okxParts}`
+            : okxUnavailable
+              ? `  okx: unavailable`
+              : null,
+          okxTags ? `  tags: ${okxTags}` : null,
+          pool.price_vs_ath_pct != null
+            ? `  ath: price_vs_ath=${pool.price_vs_ath_pct}%${pool.top_cluster_trend ? `, top_cluster=${pool.top_cluster_trend}` : ""}`
+            : null,
+          `  smart_wallets: ${sw?.in_pool?.length ?? 0} present${sw?.in_pool?.length ? ` → CONFIDENCE BOOST (${sw.in_pool.map((w) => w.name).join(", ")})` : ""}`,
+          activeBin != null ? `  active_bin: ${activeBin}` : null,
+          priceChange != null
+            ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}`
+            : null,
+          n?.narrative
+            ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}`
+            : `  narrative_untrusted: none`,
+          mem
+            ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}`
+            : null,
+        ];
+      }
+      block = block
         .filter(Boolean)
         .join("\n");
 
@@ -1244,6 +1270,24 @@ function formatCandidates(candidates) {
   ].join("\n");
 }
 
+function buildGmgnFunnelReport(stageCounts, allFiltered = [], { fromStage = 1 } = {}) {
+  if (!stageCounts) return null;
+  const sc = stageCounts;
+  const funnel = `GMGN funnel: ranked=${sc.ranked ?? "?"} → S1=${sc.s1 ?? "?"} → S2=${sc.s2 ?? "?"} → S3=${sc.s3 ?? "?"} → S4=${sc.s4 ?? "?"} → final=${sc.s5 ?? "?"}`;
+  const byStage = {};
+  for (const f of allFiltered) {
+    if (f.stage < fromStage) continue;
+    const key = `s${f.stage}`;
+    if (!byStage[key]) byStage[key] = [];
+    byStage[key].push(`${f.name}: ${f.reason}`);
+  }
+  const stageLabels = { s2: "S2 info", s3: "S3 pool", s4: "S4 indicators", s5: "S5 pick" };
+  const details = Object.entries(byStage)
+    .map(([key, items]) => `${stageLabels[key] || key}:\n${items.map(r => `  • ${r}`).join("\n")}`)
+    .join("\n");
+  return details ? `${funnel}\n\n${details}` : funnel;
+}
+
 function getDeterministicCloseRule(position, managementConfig, poolData = null) {
   const tracked = getTrackedPosition(position.position);
   const pnlSuspect = (() => {
@@ -1547,7 +1591,7 @@ function formatConfigSnapshot() {
     `Repeat deploy cooldown: ${config.management.repeatDeployCooldownEnabled ? "on" : "off"} | ${config.management.repeatDeployCooldownTriggerCount}x / ${config.management.repeatDeployCooldownHours}h | min fee earned ${config.management.repeatDeployCooldownMinFeeEarnedPct}% | ${config.management.repeatDeployCooldownScope}`,
     `Yield floor: ${config.management.minFeePerTvl24h}% | min age ${config.management.minAgeBeforeYieldCheck}m`,
     `Dead-flow: ${config.management.deadFlowExitEnabled ? "on" : "off"} | vol<$${config.management.deadFlowExitVolume} fee/TVL<${config.management.deadFlowExitFeeTvlRatio} | ${config.management.deadFlowExitTimeframe} | age>=${config.management.deadFlowExitAgeMinutes}m`,
-    `Screening: ${config.screening.category} / ${config.screening.timeframe} | TVL ${config.screening.minTvl}-${config.screening.maxTvl}`,
+    `Screening: ${config.screening.source || "meteora"} | ${config.screening.category} / ${config.screening.timeframe} | TVL ${config.screening.minTvl}-${config.screening.maxTvl}`,
     `Intervals: manage ${config.schedule.managementIntervalMin}m | screen ${config.schedule.screeningIntervalMin}m`,
     `HiveMind: ${isHiveMindEnabled() ? "enabled" : "disabled"}${config.hiveMind.agentId ? ` | ${config.hiveMind.agentId}` : ""}`,
   ].join("\n");
