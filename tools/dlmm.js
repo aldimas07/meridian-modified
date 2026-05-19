@@ -29,7 +29,7 @@ import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import { normalizeMint } from "./wallet.js";
 import { appendDecision } from "../decision-log.js";
 import { agentMeridianJson, getAgentIdForRequests, getAgentMeridianHeaders } from "./agent-meridian.js";
-import { consumeStagedSignals } from "../signal-tracker.js";
+import { getAndClearStagedSignals } from "../signal-tracker.js";
 
 // ─── Lazy SDK loader ───────────────────────────────────────────
 // @meteora-ag/dlmm → @coral-xyz/anchor uses CJS directory imports
@@ -685,7 +685,7 @@ export async function deployPosition({
 
       const positionAddress = matching?.position || null;
       if (positionAddress) {
-        const signalSnapshot = consumeStagedSignals(pool_address);
+        const signalSnapshot = getAndClearStagedSignals(pool_address, baseMint);
         trackPosition({
           position: positionAddress,
           pool: pool_address,
@@ -821,7 +821,7 @@ export async function deployPosition({
     log("deploy", `SUCCESS — ${txHashes.length} tx(s): ${txHashes[0]}`);
 
     _positionsCacheAt = 0;
-    const signalSnapshot = consumeStagedSignals(pool_address);
+    const signalSnapshot = getAndClearStagedSignals(pool_address, baseMint);
     trackPosition({
       position: newPosition.publicKey.toString(),
       pool: pool_address,

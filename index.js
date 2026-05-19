@@ -919,6 +919,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
       // Stage signals for Darwinian weighting — captured before LLM decides
       if (config.darwin?.enabled) {
         stageSignals(pool.pool, {
+          base_mint: pool.base?.mint || null,
           organic_score: pool.organic_score ?? null,
           fee_tvl_ratio: pool.fee_active_tvl_ratio ?? null,
           volume: pool.volume_window ?? null,
