@@ -203,6 +203,28 @@ export function setPositionInstruction(position_address, instruction) {
   return true;
 }
 
+/**
+ * Reconcile peak_pnl_pct from an external PnL source (e.g. snapshot).
+ * Updates peak if the given value is higher than the current tracked peak.
+ * Returns true if peak was updated.
+ */
+export function reconcilePeakFromPnl(position_address, pnlPct) {
+  if (pnlPct == null) return false;
+  const state = load();
+  const pos = state.positions[position_address];
+  if (!pos || pos.closed) return false;
+
+  const currentPeak = pos.peak_pnl_pct ?? 0;
+  if (pnlPct <= currentPeak) return false;
+
+  pos.peak_pnl_pct = pnlPct;
+  pos.pending_peak_pnl_pct = null;
+  pos.pending_peak_started_at = null;
+  save(state);
+  log("state", `Position ${position_address} peak PnL reconciled to ${pnlPct.toFixed(2)}% (was ${currentPeak.toFixed(2)}%)`);
+  return true;
+}
+
 export function queuePeakConfirmation(position_address, candidatePnlPct, options = {}) {
   if (candidatePnlPct == null) return false;
   const state = load();

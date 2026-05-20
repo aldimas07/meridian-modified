@@ -39,6 +39,7 @@ import {
   resolvePendingPeak,
   queueTrailingDropConfirmation,
   resolvePendingTrailingDrop,
+  reconcilePeakFromPnl,
 } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import {
@@ -48,6 +49,7 @@ import {
 } from "./pool-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
+import { confirmBounceSetup } from "./tools/chart-indicators.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
@@ -312,11 +314,45 @@ export async function runManagementCycle({ silent = false } = {}) {
       return mgmtReport;
     }
 
-    // Snapshot + load pool memory
+    // Snapshot + load pool memory + reconcile peak tracking
     const positionData = positions.map((p) => {
       recordPositionSnapshot(p.pool, p);
+      // Cross-check snapshot PnL against peak tracking to prevent undercount
+      reconcilePeakFromPnl(p.position, p.pnl_pct);
       return { ...p, recall: recallForPool(p.pool) };
     });
+
+    // Fetch chart indicators for all open positions (if enabled)
+    if (config.indicators?.enabled) {
+      const indicatorResults = await Promise.allSettled(
+        positionData.map(async (p) => {
+          try {
+            const result = await confirmBounceSetup({
+              mint: p.base_mint,
+              interval: config.indicators.bounceInterval,
+              rules: config.indicators.bounceRules,
+            });
+            return { pool: p.pool, indicator: result };
+          } catch (e) {
+            log("management_warn", `Indicator fetch failed for ${p.pair}: ${e.message}`);
+            return { pool: p.pool, indicator: null };
+          }
+        })
+      );
+      for (let i = 0; i < positionData.length; i++) {
+        const r = indicatorResults[i];
+        if (r.status === "fulfilled" && r.value.indicator) {
+          positionData[i].mgmt_indicator = r.value.indicator;
+          if (r.value.indicator.signal) {
+            positionData[i].mgmt_indicator_signal = r.value.indicator.signal;
+          }
+        }
+      }
+      const successCount = indicatorResults.filter(
+        (r) => r.status === "fulfilled" && r.value.indicator
+      ).length;
+      log("management", `Indicators fetched: ${successCount}/${positionData.length} positions`);
+    }
 
     // JS trailing TP check
     const exitMap = new Map();
@@ -465,6 +501,16 @@ export async function runManagementCycle({ silent = false } = {}) {
         const proximityText = formatClosestRule(closestRules);
         if (proximityText) line += `\n📍 ${proximityText}`;
       }
+      // Chart indicators (if available)
+      if (p.mgmt_indicator_signal) {
+        const sig = p.mgmt_indicator_signal;
+        const parts = [
+          sig.supertrendDirection ? `ST=${sig.supertrendDirection}` : null,
+          sig.rsi != null ? `RSI=${sig.rsi}` : null,
+          sig.bbPosition ? `BB=${sig.bbPosition}` : null,
+        ].filter(Boolean).join(" | ");
+        if (parts) line += `\n📊 ${parts}`;
+      }
       return line;
     });
 
@@ -502,12 +548,24 @@ export async function runManagementCycle({ silent = false } = {}) {
       const actionBlocks = actionPositions
         .map((p) => {
           const act = actionMap.get(p.position);
+          const indicatorLine = p.mgmt_indicator_signal
+            ? (() => {
+                const sig = p.mgmt_indicator_signal;
+                const parts = [
+                  sig.supertrendDirection ? `supertrend=${sig.supertrendDirection}${sig.supertrendBreakUp ? " (breakup)" : ""}` : null,
+                  sig.rsi != null ? `rsi=${sig.rsi} ${sig.rsiLabel || ""}`.trim() : null,
+                  sig.bbPosition ? `bb=${sig.bbPosition}` : null,
+                ].filter(Boolean).join(" | ");
+                return parts ? `  indicators [${sig.interval || "15m"}]: ${parts}` : null;
+              })()
+            : null;
           return [
             `POSITION: ${p.pair} (${p.position})`,
             `  pool: ${p.pool}`,
             `  action: ${act.action}${act.rule && act.rule !== "exit" ? ` — Rule ${act.rule}: ${act.reason}` : ""}${act.rule === "exit" ? ` — ⚡ Trailing TP: ${act.reason}` : ""}`,
             `  pnl_pct: ${p.pnl_pct}% | unclaimed_fees: ${cur}${p.unclaimed_fees_usd} | value: ${cur}${p.total_value_usd} | fee_per_tvl_24h: ${p.fee_per_tvl_24h ?? "?"}%`,
             `  bins: lower=${p.lower_bin} upper=${p.upper_bin} active=${p.active_bin} | oor_minutes: ${p.minutes_out_of_range ?? 0}`,
+            indicatorLine,
             p.instruction ? `  instruction: "${p.instruction}"` : null,
           ]
             .filter(Boolean)
@@ -526,6 +584,12 @@ RULES:
 - CLAIM: call claim_fees with position address
 - INSTRUCTION: evaluate the instruction condition. If met → close_position. If not → HOLD, do nothing.
 - ⚡ exit alerts: close immediately, no exceptions
+
+INDICATOR GUIDANCE (if indicators line present):
+- supertrend=bearish + rsi<40 → momentum shifted against you, consider CLOSE to preserve capital
+- supertrend=bullish + rsi>75 + bb=above → overbought/extended, consider CLOSE to lock profit
+- supertrend=bullish + rsi<65 + bb=inside → healthy hold, no action needed
+- For INSTRUCTION positions: use indicators to inform whether condition is trending toward being met
 
 Execute the required actions. Do NOT re-evaluate CLOSE/CLAIM — rules already applied. Just execute.
 After executing, write a brief one-line result per position.
@@ -896,6 +960,15 @@ export async function runScreeningCycle({ silent = false } = {}) {
               ? `  okx: unavailable`
               : null,
           okxTags ? `  tags: ${okxTags}` : null,
+          pool.indicator_signal ? (() => {
+            const sig = pool.indicator_signal;
+            const parts = [
+              sig.supertrendDirection ? `supertrend=${sig.supertrendDirection}${sig.supertrendBreakUp ? " (breakup)" : ""}` : null,
+              sig.rsi != null ? `rsi=${sig.rsi} ${sig.rsiLabel || ""}`.trim() : null,
+              sig.bbPosition ? `bb=${sig.bbPosition}` : null,
+            ].filter(Boolean).join(" | ");
+            return parts ? `  indicators [${sig.interval || "15m"}]: ${parts}` : null;
+          })() : null,
           pool.price_vs_ath_pct != null
             ? `  ath: price_vs_ath=${pool.price_vs_ath_pct}%${pool.top_cluster_trend ? `, top_cluster=${pool.top_cluster_trend}` : ""}`
             : null,
