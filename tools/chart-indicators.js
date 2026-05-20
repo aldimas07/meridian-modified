@@ -1,6 +1,9 @@
 import { config } from "../config.js";
 import { log } from "../logger.js";
-import { agentMeridianJson, getAgentMeridianHeaders } from "./agent-meridian.js";
+import {
+  agentMeridianJson,
+  getAgentMeridianHeaders,
+} from "./agent-meridian.js";
 import { safeNumber } from "../utils/number.js";
 
 const DEFAULT_INTERVALS = ["5_MINUTE"];
@@ -9,12 +12,57 @@ const DEFAULT_CANDLES = 298;
 function normalizeIntervals(intervals) {
   const list = Array.isArray(intervals) ? intervals : DEFAULT_INTERVALS;
   return list
-    .map((value) => String(value || "").trim().toUpperCase())
+    .map((value) =>
+      String(value || "")
+        .trim()
+        .toUpperCase(),
+    )
     .filter((value) => value === "5_MINUTE" || value === "15_MINUTE");
 }
 
 function safeNum(value) {
   return safeNumber(value, null);
+}
+
+/**
+ * Compute RSI locally from raw candle close prices using Wilder's smoothing.
+ * @param {Array} candles - Array of { close } objects from backend
+ * @param {number} period - RSI period (default 14)
+ * @returns {number|null} RSI value 0-100, or null if insufficient data
+ */
+function computeLocalRSI(candles, period = 14) {
+  if (!Array.isArray(candles) || candles.length < period + 1) return null;
+
+  const closes = candles.map((c) => Number(c?.close)).filter(Number.isFinite);
+  if (closes.length < period + 1) return null;
+
+  // Calculate price changes
+  const deltas = [];
+  for (let i = 1; i < closes.length; i++) {
+    deltas.push(closes[i] - closes[i - 1]);
+  }
+
+  // First average: simple average of first `period` changes
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 0; i < period; i++) {
+    if (deltas[i] > 0) avgGain += deltas[i];
+    else avgLoss += Math.abs(deltas[i]);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  // Wilder's smoothing for remaining deltas
+  for (let i = period; i < deltas.length; i++) {
+    const gain = deltas[i] > 0 ? deltas[i] : 0;
+    const loss = deltas[i] < 0 ? Math.abs(deltas[i]) : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
+
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return Number((100 - 100 / (1 + rs)).toFixed(4));
 }
 
 function buildSignalSummary(payload) {
@@ -70,13 +118,27 @@ function evaluatePreset(side, preset, payload) {
     case "supertrend_break":
       return side === "entry"
         ? {
-            confirmed: summary.supertrendBreakUp || (isBullish && close != null && summary.supertrendValue != null && close >= summary.supertrendValue),
-            reason: summary.supertrendBreakUp ? "Supertrend flipped bullish" : "Price is above bullish Supertrend",
+            confirmed:
+              summary.supertrendBreakUp ||
+              (isBullish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close >= summary.supertrendValue),
+            reason: summary.supertrendBreakUp
+              ? "Supertrend flipped bullish"
+              : "Price is above bullish Supertrend",
             signal: summary,
           }
         : {
-            confirmed: summary.supertrendBreakDown || (isBearish && close != null && summary.supertrendValue != null && close <= summary.supertrendValue),
-            reason: summary.supertrendBreakDown ? "Supertrend flipped bearish" : "Price is below bearish Supertrend",
+            confirmed:
+              summary.supertrendBreakDown ||
+              (isBearish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close <= summary.supertrendValue),
+            reason: summary.supertrendBreakDown
+              ? "Supertrend flipped bearish"
+              : "Price is below bearish Supertrend",
             signal: summary,
           };
     case "rsi_reversal":
@@ -107,14 +169,16 @@ function evaluatePreset(side, preset, payload) {
       return side === "entry"
         ? {
             confirmed:
-              (rsi != null && rsi <= oversold) &&
+              rsi != null &&
+              rsi <= oversold &&
               (summary.supertrendBreakUp || isBullish),
             reason: `RSI oversold with bullish Supertrend context`,
             signal: summary,
           }
         : {
             confirmed:
-              (rsi != null && rsi >= overbought) &&
+              rsi != null &&
+              rsi >= overbought &&
               (summary.supertrendBreakDown || isBearish),
             reason: `RSI overbought with bearish Supertrend context`,
             signal: summary,
@@ -124,7 +188,10 @@ function evaluatePreset(side, preset, payload) {
         ? {
             confirmed:
               summary.supertrendBreakUp ||
-              (isBullish && close != null && summary.supertrendValue != null && close >= summary.supertrendValue) ||
+              (isBullish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close >= summary.supertrendValue) ||
               (rsi != null && rsi <= oversold),
             reason: "Supertrend bullish confirmation or RSI oversold",
             signal: summary,
@@ -132,7 +199,10 @@ function evaluatePreset(side, preset, payload) {
         : {
             confirmed:
               summary.supertrendBreakDown ||
-              (isBearish && close != null && summary.supertrendValue != null && close <= summary.supertrendValue) ||
+              (isBearish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close <= summary.supertrendValue) ||
               (rsi != null && rsi >= overbought),
             reason: "Supertrend bearish confirmation or RSI overbought",
             signal: summary,
@@ -170,9 +240,7 @@ function evaluatePreset(side, preset, payload) {
             signal: summary,
           }
         : {
-            confirmed:
-              crossedUp(summary.fib618) ||
-              crossedUp(summary.fib50),
+            confirmed: crossedUp(summary.fib618) || crossedUp(summary.fib50),
             reason: "Price reclaimed a key Fibonacci level upward",
             signal: summary,
           };
@@ -180,8 +248,7 @@ function evaluatePreset(side, preset, payload) {
       return side === "entry"
         ? {
             confirmed:
-              crossedDown(summary.fib618) ||
-              crossedDown(summary.fib50),
+              crossedDown(summary.fib618) || crossedDown(summary.fib50),
             reason: "Price rejected from a key Fibonacci level",
             signal: summary,
           }
@@ -207,11 +274,13 @@ export async function fetchChartIndicatorsForMint(
   {
     interval,
     candles = config.indicators.candles ?? DEFAULT_CANDLES,
-    rsiLength = config.indicators.rsiLength ?? 2,
+    rsiLength = config.indicators.rsiLength ?? 14,
     refresh = false,
   } = {},
 ) {
-  const normalizedInterval = String(interval || "15_MINUTE").trim().toUpperCase();
+  const normalizedInterval = String(interval || "15_MINUTE")
+    .trim()
+    .toUpperCase();
   const search = new URLSearchParams({
     interval: normalizedInterval,
     candles: String(candles),
@@ -219,31 +288,66 @@ export async function fetchChartIndicatorsForMint(
   });
   if (refresh) search.set("refresh", "1");
 
-  return agentMeridianJson(`/chart-indicators/${mint}?${search.toString()}`, {
-    headers: getAgentMeridianHeaders(),
-  });
+  const payload = await agentMeridianJson(
+    `/chart-indicators/${mint}?${search.toString()}`,
+    { headers: getAgentMeridianHeaders() },
+  );
+
+  // Backend ignores rsiLength param — compute RSI locally from candle data
+  if (payload?.candles?.length && rsiLength > 0) {
+    const localRSI = computeLocalRSI(payload.candles, rsiLength);
+    if (localRSI != null) {
+      if (!payload.latest) payload.latest = {};
+      if (!payload.latest.rsi) payload.latest.rsi = {};
+      const backendRSI = payload.latest.rsi.value;
+      payload.latest.rsi.value = localRSI;
+      payload.latest.rsi._local = true;
+      payload.latest.rsi._rsiLength = rsiLength;
+      log(
+        "rsi_local",
+        `${mint.slice(0, 8)} RSI override: backend=${backendRSI} → local(${rsiLength})=${localRSI}`,
+      );
+    }
+  }
+
+  return payload;
 }
 
 export async function confirmIndicatorPreset({
   mint,
   side,
-  preset = side === "entry" ? config.indicators.entryPreset : config.indicators.exitPreset,
+  preset = side === "entry"
+    ? config.indicators.entryPreset
+    : config.indicators.exitPreset,
   intervals = config.indicators.intervals,
   refresh = false,
 } = {}) {
   if (!config.indicators.enabled || !mint || !preset) {
-    return { enabled: false, confirmed: true, reason: "Indicators disabled or not configured", intervals: [] };
+    return {
+      enabled: false,
+      confirmed: true,
+      reason: "Indicators disabled or not configured",
+      intervals: [],
+    };
   }
 
   const targets = normalizeIntervals(intervals);
   if (targets.length === 0) {
-    return { enabled: false, confirmed: true, reason: "No indicator intervals configured", intervals: [] };
+    return {
+      enabled: false,
+      confirmed: true,
+      reason: "No indicator intervals configured",
+      intervals: [],
+    };
   }
 
   const results = [];
   for (const interval of targets) {
     try {
-      const payload = await fetchChartIndicatorsForMint(mint, { interval, refresh });
+      const payload = await fetchChartIndicatorsForMint(mint, {
+        interval,
+        refresh,
+      });
       const evaluation = evaluatePreset(side, preset, payload);
       results.push({
         interval,
@@ -254,7 +358,10 @@ export async function confirmIndicatorPreset({
         latest: payload?.latest || null,
       });
     } catch (error) {
-      log("indicators_warn", `Indicator fetch failed for ${mint.slice(0, 8)} ${interval}: ${error.message}`);
+      log(
+        "indicators_warn",
+        `Indicator fetch failed for ${mint.slice(0, 8)} ${interval}: ${error.message}`,
+      );
       results.push({
         interval,
         ok: false,
@@ -292,7 +399,10 @@ export async function confirmIndicatorPreset({
     side,
     requireAllIntervals: requireAll,
     reason: confirmed
-      ? `${preset} confirmed on ${successful.filter((entry) => entry.confirmed).map((entry) => entry.interval).join(", ")}`
+      ? `${preset} confirmed on ${successful
+          .filter((entry) => entry.confirmed)
+          .map((entry) => entry.interval)
+          .join(", ")}`
       : `${preset} not confirmed on ${successful.map((entry) => entry.interval).join(", ")}`,
     intervals: results,
   };
@@ -318,13 +428,17 @@ export function evaluateBounceSetup(payload, rules = {}) {
 
   const isBullish = stDirection === "bullish" || stBreakUp;
   const alreadyAtBottom =
-    Number.isFinite(rsiValue) && rsiValue < oversold &&
-    close > 0 && lowerBand > 0 && close < lowerBand;
+    Number.isFinite(rsiValue) &&
+    rsiValue < oversold &&
+    close > 0 &&
+    lowerBand > 0 &&
+    close < lowerBand;
   const priceAboveSupertrend = close > 0 && stValue > 0 && close >= stValue;
 
   let bbPosition = "inside";
   if (close > 0 && upperBand > 0 && close > upperBand) bbPosition = "above";
-  else if (close > 0 && lowerBand > 0 && close < lowerBand) bbPosition = "below";
+  else if (close > 0 && lowerBand > 0 && close < lowerBand)
+    bbPosition = "below";
 
   let rsiLabel = null;
   if (Number.isFinite(rsiValue)) {
@@ -339,19 +453,31 @@ export function evaluateBounceSetup(payload, rules = {}) {
     reasons.push(`no bounce support: ${stDirection} supertrend`);
 
   if (rules.rejectAlreadyAtBottom !== false && alreadyAtBottom)
-    reasons.push(`already at bottom: RSI ${rsiValue.toFixed(1)}, price below lower BB`);
+    reasons.push(
+      `already at bottom: RSI ${rsiValue.toFixed(1)}, price below lower BB`,
+    );
 
   if (rules.requireAboveSupertrend && !priceAboveSupertrend)
     reasons.push(`price below supertrend (${stValue})`);
 
-  if (rules.minRsi != null && Number.isFinite(rsiValue) && rsiValue < rules.minRsi)
+  if (
+    rules.minRsi != null &&
+    Number.isFinite(rsiValue) &&
+    rsiValue < rules.minRsi
+  )
     reasons.push(`RSI ${rsiValue.toFixed(1)} < min ${rules.minRsi}`);
 
-  if (rules.maxRsi != null && Number.isFinite(rsiValue) && rsiValue > rules.maxRsi)
+  if (
+    rules.maxRsi != null &&
+    Number.isFinite(rsiValue) &&
+    rsiValue > rules.maxRsi
+  )
     reasons.push(`RSI ${rsiValue.toFixed(1)} > max ${rules.maxRsi}`);
 
   if (rules.requireBbPosition != null && bbPosition !== rules.requireBbPosition)
-    reasons.push(`BB position ${bbPosition} != required ${rules.requireBbPosition}`);
+    reasons.push(
+      `BB position ${bbPosition} != required ${rules.requireBbPosition}`,
+    );
 
   return {
     passed: reasons.length === 0,
@@ -377,7 +503,13 @@ export async function confirmBounceSetup({
   rules = config.indicators.bounceRules,
 } = {}) {
   if (!mint) {
-    return { enabled: false, passed: true, skipped: true, reason: "No mint provided", signal: null };
+    return {
+      enabled: false,
+      passed: true,
+      skipped: true,
+      reason: "No mint provided",
+      signal: null,
+    };
   }
   try {
     const payload = await fetchChartIndicatorsForMint(mint, { interval });
@@ -385,7 +517,16 @@ export async function confirmBounceSetup({
     result.signal = { ...result.signal, interval };
     return { enabled: true, ...result, skipped: false };
   } catch (error) {
-    log("indicators_warn", `Bounce indicator fetch failed for ${mint.slice(0, 8)}: ${error.message}`);
-    return { enabled: true, passed: true, skipped: true, reason: `Indicator API unavailable: ${error.message}`, signal: null };
+    log(
+      "indicators_warn",
+      `Bounce indicator fetch failed for ${mint.slice(0, 8)}: ${error.message}`,
+    );
+    return {
+      enabled: true,
+      passed: true,
+      skipped: true,
+      reason: `Indicator API unavailable: ${error.message}`,
+      signal: null,
+    };
   }
 }
