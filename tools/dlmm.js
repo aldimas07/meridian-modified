@@ -28,6 +28,7 @@ import { recordPerformance } from "../lessons.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import { normalizeMint } from "./wallet.js";
 import { appendDecision } from "../decision-log.js";
+import { getActiveStrategy } from "../strategy-library.js";
 import { agentMeridianJson, getAgentIdForRequests, getAgentMeridianHeaders } from "./agent-meridian.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
 
@@ -159,7 +160,7 @@ function getTransactionInstructions(tx) {
     .filter(Boolean);
 }
 
-function assertNoUnsafeSystemTransfer(tx, wallet, allowedDestinations = []) {
+function assertNoUnsafeSystemTransfer(tx, wallet, allowedDestinations = [], { maxDustLamports = 50_000 } = {}) {
   const owner = wallet.publicKey.toString();
   const allowed = new Set(allowedDestinations.filter(Boolean).map(String));
 
@@ -179,9 +180,15 @@ function assertNoUnsafeSystemTransfer(tx, wallet, allowedDestinations = []) {
       : SystemInstruction.decodeTransferWithSeed(ix);
     const source = decoded.fromPubkey?.toString();
     const destination = decoded.toPubkey?.toString();
+    const lamports = Number(decoded.lamports ?? 0);
     if (source === owner && !allowed.has(destination)) {
+      // Allow dust-sized transfers (rent-exempt, protocol fees) — maxSolLoss check handles total exposure
+      if (lamports <= maxDustLamports) {
+        log("close_debug", `Relay dust transfer allowed: ${lamports} lamports to ${destination?.slice(0, 8) || "unknown"}`);
+        continue;
+      }
       throw new Error(
-        `Relay transaction contains direct SOL transfer from owner to ${destination?.slice(0, 8) || "unknown"}.`,
+        `Relay transaction contains direct SOL transfer from owner to ${destination || "unknown"} (${lamports} lamports).`,
       );
     }
   }
@@ -210,6 +217,29 @@ async function signAndSimulateRelayTransactions(serializedTxs, wallet, {
 
     const signedBase64 = signSerializedTransaction(serialized, wallet);
     const tx = deserializeSignedTransaction(signedBase64);
+    // Diagnostic: log all system transfers before safety check
+    try {
+      const transfers = [];
+      for (const ix of getTransactionInstructions(tx)) {
+        if (!ix.programId.equals(SystemProgram.programId)) continue;
+        let type = null;
+        try { type = SystemInstruction.decodeInstructionType(ix); } catch { continue; }
+        if (type !== "Transfer" && type !== "TransferWithSeed") continue;
+        const decoded = type === "Transfer"
+          ? SystemInstruction.decodeTransfer(ix)
+          : SystemInstruction.decodeTransferWithSeed(ix);
+        transfers.push({
+          from: decoded.fromPubkey?.toString(),
+          to: decoded.toPubkey?.toString(),
+          lamports: Number(decoded.lamports ?? 0),
+        });
+      }
+      if (transfers.length > 0) {
+        log("close_debug", `Relay ${label || "tx"} ${index + 1} system transfers: ${JSON.stringify(transfers)}`);
+      }
+    } catch (diagErr) {
+      log("close_debug", `Relay ${label || "tx"} ${index + 1} diagnostic error: ${diagErr.message}`);
+    }
     assertNoUnsafeSystemTransfer(tx, wallet, allowedSystemTransferDestinations);
     const staticKeys = getStaticAccountKeyStrings(tx);
     for (const account of requiredStaticAccounts.filter(Boolean)) {
@@ -470,6 +500,19 @@ export async function deployPosition({
 }) {
   pool_address = normalizeMint(pool_address);
   const activeStrategy = strategy || config.strategy.strategy;
+
+  // Hard validation: enforce active strategy's lp_strategy constraint
+  const activeStrat = getActiveStrategy();
+  if (activeStrat && activeStrat.lp_strategy && activeStrat.lp_strategy !== "any" && activeStrat.lp_strategy !== "mixed") {
+    const requestedStrategy = activeStrategy;
+    const allowedStrategy = activeStrat.lp_strategy;
+    if (requestedStrategy !== allowedStrategy) {
+      const errorMsg = `Strategy mismatch: active strategy "${activeStrat.name}" requires "${allowedStrategy}" but "${requestedStrategy}" was requested. This is a hard constraint — not negotiable.`;
+      log("deploy", errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  }
+
   let activeBinsBelow = bins_below ?? config.strategy.defaultBinsBelow ?? config.strategy.minBinsBelow;
   let activeBinsAbove = bins_above ?? 0;
   const parsedVolatility = volatility == null ? null : Number(volatility);

@@ -310,6 +310,19 @@ export const config = {
     rsiOversold: indicatorUserConfig.rsiOversold ?? 30,
     rsiOverbought: indicatorUserConfig.rsiOverbought ?? 80,
     requireAllIntervals: indicatorUserConfig.requireAllIntervals ?? false,
+    mode: indicatorUserConfig.mode ?? "preset",   // "preset" (existing) or "bounce" (GMGN-style)
+    bounceRules: (() => {
+      const r = indicatorUserConfig.bounceRules ?? {};
+      return {
+        requireBullishSupertrend: r.requireBullishSupertrend ?? true,
+        rejectAlreadyAtBottom:    r.rejectAlreadyAtBottom    ?? true,
+        requireAboveSupertrend:   r.requireAboveSupertrend   ?? false,
+        minRsi:                   r.minRsi                   ?? null,
+        maxRsi:                   r.maxRsi                   ?? null,
+        requireBbPosition:        r.requireBbPosition        ?? null,
+      };
+    })(),
+    bounceInterval: indicatorUserConfig.bounceInterval ?? "15_MINUTE",
   },
 };
 

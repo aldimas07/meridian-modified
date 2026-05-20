@@ -404,7 +404,16 @@ function condenseGmgnCandidate({ token, pool, poolDetail, security, info, infoAn
     price: num(info.price || token.price),
     price_change_pct: num(token.price_change_percent5m ?? token.price_change_percent),
     volume: num(token.volume ?? 0),
+    volume_window: num(token.volume ?? 0), // alias for Meteora-path compatibility
     swap_count: token.swaps ?? null,
+    // Organic score proxy for GMGN pools (Meteora uses token_x.organic_score 0-100).
+    // Derived from smart wallet + holder signals since GMGN has no direct organic metric.
+    organic_score: Math.min(100, Math.round(
+      (num(token.holder_count || info.holder_count) >= 500 ? 20 : 0) +
+      smartCount * 20 +
+      kolCount * 15 +
+      Math.max(0, 100 - num(security?.rug_ratio ?? 0.5) * 100) * 0.4
+    )),
     gmgn: true,
     gmgn_score: Number(gmgnScore.toFixed(2)),
     gmgn_total_fee_sol: num(infoAnalysis?.totalFeeSol ?? info.total_fee),

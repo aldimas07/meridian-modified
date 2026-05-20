@@ -297,3 +297,95 @@ export async function confirmIndicatorPreset({
     intervals: results,
   };
 }
+
+/**
+ * Evaluate a GMGN-style bounce setup from indicator payload data.
+ * Pure evaluator — no API calls.
+ */
+export function evaluateBounceSetup(payload, rules = {}) {
+  const latest = payload?.latest || {};
+  const st = latest?.supertrend || {};
+  const stDirection = String(st.direction || "").toLowerCase();
+  const stBreakUp = !!latest?.states?.supertrendBreakUp;
+  const close = Number(latest?.candle?.close) || 0;
+  const rsiValue = Number(latest?.rsi?.value);
+  const bb = latest?.bollinger || {};
+  const upperBand = Number(bb.upper) || 0;
+  const lowerBand = Number(bb.lower) || 0;
+  const oversold = Number(config.indicators?.rsiOversold ?? 35);
+  const overbought = Number(config.indicators?.rsiOverbought ?? 80);
+  const stValue = Number(st.value) || 0;
+
+  const isBullish = stDirection === "bullish" || stBreakUp;
+  const alreadyAtBottom =
+    Number.isFinite(rsiValue) && rsiValue < oversold &&
+    close > 0 && lowerBand > 0 && close < lowerBand;
+  const priceAboveSupertrend = close > 0 && stValue > 0 && close >= stValue;
+
+  let bbPosition = "inside";
+  if (close > 0 && upperBand > 0 && close > upperBand) bbPosition = "above";
+  else if (close > 0 && lowerBand > 0 && close < lowerBand) bbPosition = "below";
+
+  let rsiLabel = null;
+  if (Number.isFinite(rsiValue)) {
+    if (rsiValue < 35) rsiLabel = "oversold";
+    else if (rsiValue > 65) rsiLabel = "overbought";
+    else rsiLabel = "neutral";
+  }
+
+  const reasons = [];
+
+  if (rules.requireBullishSupertrend !== false && !isBullish)
+    reasons.push(`no bounce support: ${stDirection} supertrend`);
+
+  if (rules.rejectAlreadyAtBottom !== false && alreadyAtBottom)
+    reasons.push(`already at bottom: RSI ${rsiValue.toFixed(1)}, price below lower BB`);
+
+  if (rules.requireAboveSupertrend && !priceAboveSupertrend)
+    reasons.push(`price below supertrend (${stValue})`);
+
+  if (rules.minRsi != null && Number.isFinite(rsiValue) && rsiValue < rules.minRsi)
+    reasons.push(`RSI ${rsiValue.toFixed(1)} < min ${rules.minRsi}`);
+
+  if (rules.maxRsi != null && Number.isFinite(rsiValue) && rsiValue > rules.maxRsi)
+    reasons.push(`RSI ${rsiValue.toFixed(1)} > max ${rules.maxRsi}`);
+
+  if (rules.requireBbPosition != null && bbPosition !== rules.requireBbPosition)
+    reasons.push(`BB position ${bbPosition} != required ${rules.requireBbPosition}`);
+
+  return {
+    passed: reasons.length === 0,
+    reasons,
+    signal: {
+      interval: null, // caller sets this
+      rsi: Number.isFinite(rsiValue) ? Number(rsiValue.toFixed(1)) : null,
+      rsiLabel,
+      bbPosition,
+      supertrendDirection: stDirection || null,
+      supertrendBreakUp: stBreakUp,
+      aboveSupertrend: close > 0 && stValue > 0 ? close >= stValue : null,
+    },
+  };
+}
+
+/**
+ * Fetch chart indicators for a mint and evaluate GMGN-style bounce setup.
+ */
+export async function confirmBounceSetup({
+  mint,
+  interval = config.indicators.bounceInterval ?? "15_MINUTE",
+  rules = config.indicators.bounceRules,
+} = {}) {
+  if (!mint) {
+    return { enabled: false, passed: true, skipped: true, reason: "No mint provided", signal: null };
+  }
+  try {
+    const payload = await fetchChartIndicatorsForMint(mint, { interval });
+    const result = evaluateBounceSetup(payload, rules);
+    result.signal = { ...result.signal, interval };
+    return { enabled: true, ...result, skipped: false };
+  } catch (error) {
+    log("indicators_warn", `Bounce indicator fetch failed for ${mint.slice(0, 8)}: ${error.message}`);
+    return { enabled: true, passed: true, skipped: true, reason: `Indicator API unavailable: ${error.message}`, signal: null };
+  }
+}

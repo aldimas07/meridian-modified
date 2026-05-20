@@ -3,7 +3,7 @@ import { isBlacklisted } from "../token-blacklist.js";
 import { isDevBlocked, getBlockedDevs } from "../dev-blocklist.js";
 import { log } from "../logger.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import { confirmIndicatorPreset } from "./chart-indicators.js";
+import { confirmIndicatorPreset, confirmBounceSetup } from "./chart-indicators.js";
 import { discoverGmgnPools } from "./gmgn.js";
 import { getAgentMeridianBase, getAgentMeridianHeaders } from "./agent-meridian.js";
 
@@ -622,13 +622,20 @@ export async function getTopCandidates({ limit = 10 } = {}) {
   }
 
   if (config.indicators.enabled && eligible.length > 0) {
+    const bounceMode = config.indicators.mode === "bounce";
     const confirmations = await Promise.all(
       eligible.map(async (pool) => {
         try {
-          const confirmation = await confirmIndicatorPreset({
-            mint: pool.base?.mint,
-            side: "entry",
-          });
+          const confirmation = bounceMode
+            ? await confirmBounceSetup({
+                mint: pool.base?.mint,
+                interval: config.indicators.bounceInterval,
+                rules: config.indicators.bounceRules,
+              })
+            : await confirmIndicatorPreset({
+                mint: pool.base?.mint,
+                side: "entry",
+              });
           return { pool: pool.pool, confirmation };
         } catch (error) {
           return {
@@ -649,9 +656,18 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     const confirmedEligible = eligible.filter((pool) => {
       const confirmation = confirmationByPool.get(pool.pool);
       pool.indicator_confirmation = confirmation || null;
-      if (!confirmation || confirmation.confirmed) return true;
-      pushFilteredReason(filteredOut, pool, `indicator reject: ${confirmation.reason}`);
-      log("screening", `Indicator rejected ${pool.name} (${pool.pool.slice(0, 8)}): ${confirmation.reason}`);
+      if (bounceMode && confirmation?.signal) {
+        pool.indicator_signal = confirmation.signal;
+      }
+      if (!confirmation) return true;
+      if (bounceMode) {
+        if (confirmation.skipped || confirmation.passed !== false) return true;
+      } else {
+        if (confirmation.confirmed) return true;
+      }
+      const reasonStr = confirmation.reason || (Array.isArray(confirmation.reasons) ? confirmation.reasons.join("; ") : "unknown");
+      pushFilteredReason(filteredOut, pool, `indicator reject: ${reasonStr}`);
+      log("screening", `Indicator rejected ${pool.name} (${pool.pool.slice(0, 8)}): ${reasonStr}`);
       return false;
     });
     eligible.splice(0, eligible.length, ...confirmedEligible);
