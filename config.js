@@ -109,6 +109,7 @@ export const config = {
     maxTokenAgeHours:   u.maxTokenAgeHours   ?? null, // null = no maximum
     athFilterPct:       u.athFilterPct       ?? null, // e.g. -20 = only deploy if price is >= 20% below ATH
     maxVolatility:      u.maxVolatility      ?? 5.0,  // evolved by lessons.js; ceiling for pool volatility
+    strategyVolatilityThreshold: u.strategyVolatilityThreshold ?? 4.0,  // vol >= this → spot; vol < this → bid_ask
   },
 
   // ─── GMGN Screening Pipeline ─────────────

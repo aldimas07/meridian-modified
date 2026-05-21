@@ -694,6 +694,22 @@ async function runSafetyChecks(name, args) {
           reason: `volatility ${args.volatility} is invalid. Refusing deploy because the volatility feed is unusable.`,
         };
       }
+
+      // ── Volatility-based strategy enforcement ──────────────────────────
+      const volThreshold = Number(config.screening.strategyVolatilityThreshold ?? 4.0);
+      const requestedStrategy = (args.strategy || config.strategy.strategy || "bid_ask").toLowerCase().replace("-", "_");
+      let enforcedStrategy = requestedStrategy;
+      if (Number.isFinite(requestedVolatility) && requestedVolatility > 0) {
+        if (requestedVolatility >= volThreshold && requestedStrategy !== "spot") {
+          enforcedStrategy = "spot";
+          console.log(`[executor] volatility ${requestedVolatility.toFixed(2)} >= ${volThreshold} → overriding strategy ${requestedStrategy} → spot`);
+        } else if (requestedVolatility < volThreshold && requestedStrategy !== "bid_ask") {
+          enforcedStrategy = "bid_ask";
+          console.log(`[executor] volatility ${requestedVolatility.toFixed(2)} < ${volThreshold} → overriding strategy ${requestedStrategy} → bid_ask`);
+        }
+      }
+      args.strategy = enforcedStrategy;
+
       if (
         args.downside_pct == null &&
         args.upside_pct == null &&
