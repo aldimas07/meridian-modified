@@ -160,15 +160,16 @@ function stripThink(text) {
   return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 }
 
+import { sanitizeForPrompt, containsInjectionPattern } from "./sanitize.js";
+
 function sanitizeUntrustedPromptText(text, maxLen = 500) {
   if (!text) return null;
-  const cleaned = String(text)
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/[<>`]/g, "")
-    .trim()
-    .slice(0, maxLen);
-  return cleaned ? JSON.stringify(cleaned) : null;
+  // Hard reject if injection patterns detected
+  if (containsInjectionPattern(text)) {
+    log("security", `Injection pattern detected in prompt text: ${String(text).slice(0, 100)}`);
+    return null;
+  }
+  return sanitizeForPrompt(text, maxLen);
 }
 
 function shouldUsePnlRecheck() {

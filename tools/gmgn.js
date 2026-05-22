@@ -3,6 +3,7 @@ import { setDefaultResultOrder } from "dns";
 import { config } from "../config.js";
 import { log } from "../logger.js";
 import { fetchChartIndicatorsForMint } from "./chart-indicators.js";
+import { sanitizeName } from "../sanitize.js";
 
 // Force IPv4 — GMGN OpenAPI does not support IPv6
 setDefaultResultOrder("ipv4first");
@@ -376,15 +377,15 @@ function condenseGmgnCandidate({ token, pool, poolDetail, security, info, infoAn
 
   return {
     pool: poolAddress,
-    name: pool.name || `${token.symbol || info.symbol || "?"}-SOL`,
+    name: sanitizeName(pool.name || `${token.symbol || info.symbol || "?"}-SOL`),
     base: {
-      symbol: token.symbol || info.symbol || pool.token_x?.symbol,
+      symbol: sanitizeName(token.symbol || info.symbol || pool.token_x?.symbol, 20),
       mint: token.address || info.address || pool.token_x?.address,
       organic: null,
       warnings: 0,
     },
     quote: {
-      symbol: pool.token_y?.symbol || "SOL",
+      symbol: sanitizeName(pool.token_y?.symbol || "SOL", 20),
       mint: pool.token_y?.address || config.tokens.SOL,
     },
     pool_type: "dlmm",
@@ -547,7 +548,7 @@ export async function discoverGmgnPools({ limit = 10 } = {}) {
   const s1 = ranked.filter((token) => {
     const check = passBasicRankFilter(token);
     if (!check.pass) {
-      filtered.push({ stage: 1, name: token.symbol || token.address, reason: check.reasons.join(", ") });
+      filtered.push({ stage: 1, name: sanitizeName(token.symbol || token.address), reason: check.reasons.join(", ") });
       return false;
     }
     return true;
@@ -565,13 +566,13 @@ export async function discoverGmgnPools({ limit = 10 } = {}) {
       const info = infoPayload?.data?.data || infoPayload?.data || infoPayload;
       const infoCheck = analyzeTokenInfo(info);
       if (!infoCheck.passed) {
-        filtered.push({ stage: 2, name: token.symbol || mint, reason: infoCheck.reasons.join(", ") });
+        filtered.push({ stage: 2, name: sanitizeName(token.symbol || mint), reason: infoCheck.reasons.join(", ") });
         continue;
       }
       s2.push({ token, info, infoCheck });
     } catch (error) {
       log("gmgn", `Stage2 skip ${token.symbol || mint}: ${error.message}`);
-      filtered.push({ stage: 2, name: token.symbol || mint, reason: error.message });
+      filtered.push({ stage: 2, name: sanitizeName(token.symbol || mint), reason: error.message });
     }
   }
   stageCounts.s2 = s2.length;
@@ -597,13 +598,13 @@ export async function discoverGmgnPools({ limit = 10 } = {}) {
 
       const topPools = await fetchTopMeteoraDlmmPoolsForMint(mint, minTvl, 2);
       if (topPools.length === 0) {
-        filtered.push({ stage: 3, name: token.symbol || mint, reason: `no SOL DLMM pool above tvl>${minTvl}` });
+        filtered.push({ stage: 3, name: sanitizeName(token.symbol || mint), reason: `no SOL DLMM pool above tvl>${minTvl}` });
         continue;
       }
       s3.push({ token, info, infoCheck, holdersCheck, topPools });
     } catch (error) {
       log("gmgn", `Stage3 skip ${token.symbol || mint}: ${error.message}`);
-      filtered.push({ stage: 3, name: token.symbol || mint, reason: error.message });
+      filtered.push({ stage: 3, name: sanitizeName(token.symbol || mint), reason: error.message });
     }
   }
   stageCounts.s3 = s3.length;
@@ -622,7 +623,7 @@ export async function discoverGmgnPools({ limit = 10 } = {}) {
         indicatorCheck = { passed: true, reasons: [] };
       }
       if (!indicatorCheck.passed) {
-        filtered.push({ stage: 4, name: entry.token.symbol || mint, reason: indicatorCheck.reasons.join(", ") });
+        filtered.push({ stage: 4, name: sanitizeName(entry.token.symbol || mint), reason: indicatorCheck.reasons.join(", ") });
         continue;
       }
       s4.push({ ...entry, indicatorSignal: indicatorCheck.signal });
@@ -641,19 +642,19 @@ export async function discoverGmgnPools({ limit = 10 } = {}) {
     try {
       const { pool, detail: poolDetail } = await pickBestPool(topPools);
       if (!pool) {
-        filtered.push({ stage: 5, name: token.symbol || mint, reason: "pool selection failed" });
+        filtered.push({ stage: 5, name: sanitizeName(token.symbol || mint), reason: "pool selection failed" });
         continue;
       }
       const security = {};
       const candidate = condenseGmgnCandidate({ token, pool, poolDetail, security, info, infoAnalysis: infoCheck, holdersAnalysis: holdersCheck, indicatorSignal });
       if (!candidate.pool || !candidate.base?.mint) {
-        filtered.push({ stage: 5, name: token.symbol || mint, reason: "incomplete pool mapping" });
+        filtered.push({ stage: 5, name: sanitizeName(token.symbol || mint), reason: "incomplete pool mapping" });
         continue;
       }
       pools.push(candidate);
     } catch (error) {
       log("gmgn", `Stage5 skip ${token.symbol || mint}: ${error.message}`);
-      filtered.push({ stage: 5, name: token.symbol || mint, reason: error.message });
+      filtered.push({ stage: 5, name: sanitizeName(token.symbol || mint), reason: error.message });
     }
   }
   stageCounts.s5 = pools.length;

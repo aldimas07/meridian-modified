@@ -1,3 +1,6 @@
+import { log } from "../logger.js";
+import { sanitizeName } from "../sanitize.js";
+
 const DATAPI_BASE = "https://datapi.jup.ag/v1";
 
 /**

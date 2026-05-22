@@ -6,6 +6,7 @@ import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import { confirmIndicatorPreset, confirmBounceSetup } from "./chart-indicators.js";
 import { discoverGmgnPools } from "./gmgn.js";
 import { getAgentMeridianBase, getAgentMeridianHeaders } from "./agent-meridian.js";
+import { sanitizeName } from "../sanitize.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
@@ -357,7 +358,7 @@ export async function discoverPools({
   const thresholdedRawPools = rawPools.filter((pool) => {
     const reason = getRawPoolScreeningRejectReason(pool, s);
     if (!reason) return true;
-    filteredExamples.push({ name: pool.name || pool.pool_address || "unknown pool", reason });
+    filteredExamples.push({ name: sanitizeName(pool.name || pool.pool_address || "unknown pool"), reason });
     if (pool.discord_signal) log("screening", `Discord signal filtered: ${pool.name || pool.pool_address} — ${reason}`);
     return false;
   });
@@ -708,15 +709,15 @@ export async function getPoolDetail({ pool_address, timeframe = "5m" }) {
 function condensePool(p) {
   return {
     pool: p.pool_address,
-    name: p.name,
+    name: sanitizeName(p.name || `${p.token_x?.symbol || "?"}-${p.token_y?.symbol || "?"}`),
     base: {
-      symbol: p.token_x?.symbol,
+      symbol: sanitizeName(p.token_x?.symbol, 20),
       mint: p.token_x?.address,
       organic: Math.round(p.token_x?.organic_score || 0),
       warnings: p.token_x?.warnings?.length || 0,
     },
     quote: {
-      symbol: p.token_y?.symbol,
+      symbol: sanitizeName(p.token_y?.symbol, 20),
       mint: p.token_y?.address,
     },
     pool_type: p.pool_type,
@@ -778,7 +779,7 @@ function fix(n, decimals) {
 function pushFilteredReason(list, pool, reason) {
   if (!list || !pool) return;
   list.push({
-    name: pool.name || `${pool.base?.symbol || "?"}-${pool.quote?.symbol || "?"}`,
+    name: sanitizeName(pool.name || `${pool.base?.symbol || "?"}-${pool.quote?.symbol || "?"}`),
     reason,
   });
 }
