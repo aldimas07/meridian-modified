@@ -32,6 +32,25 @@ function getJupiterApiKey() {
   return config.jupiter.apiKey || process.env.JUPITER_API_KEY;
 }
 
+/**
+ * Fetch token price from Jupiter Price API v3.
+ * Returns price in USD or null if unavailable.
+ */
+export async function getJupiterPrice(mint) {
+  try {
+    const apiKey = getJupiterApiKey();
+    const url = `${JUPITER_PRICE_API}?ids=${mint}`;
+    const headers = apiKey ? { "x-api-key": apiKey } : {};
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const entry = data?.[mint];
+    return entry?.usdPrice != null ? Number(entry.usdPrice) : null;
+  } catch {
+    return null;
+  }
+}
+
 function getJupiterReferralParams() {
   const referralAccount = String(config.jupiter.referralAccount || "").trim();
   const referralFee = Number(config.jupiter.referralFeeBps || 0);

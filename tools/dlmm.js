@@ -26,7 +26,7 @@ import {
 } from "../state.js";
 import { recordPerformance } from "../lessons.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import { normalizeMint } from "./wallet.js";
+import { normalizeMint, getJupiterPrice, getWalletBalances } from "./wallet.js";
 import { appendDecision } from "../decision-log.js";
 import { getActiveStrategy } from "../strategy-library.js";
 import { agentMeridianJson, getAgentIdForRequests, getAgentMeridianHeaders } from "./agent-meridian.js";
@@ -537,6 +537,31 @@ export async function deployPosition({
   const activeBin = await pool.getActiveBin();
   const actualBinStep = pool.lbPair.binStep;
   const activePrice = Number(getPriceOfBinByBinId(activeBin.binId, actualBinStep).toString());
+
+  // ─── Price Deviation Check (pool vs Jupiter market price) ───
+  const maxDeviationPct = config.screening.maxPriceDeviationPct ?? 5;
+  if (maxDeviationPct > 0) {
+    const jupiterPriceUsd = await getJupiterPrice(baseMint);
+    if (jupiterPriceUsd != null && jupiterPriceUsd > 0 && activePrice > 0) {
+      // activePrice is in SOL (quote token); convert to USD using Helius SOL price
+      const walletInfo = await getWalletBalances();
+      const solPriceUsd = walletInfo?.sol_price || 0;
+      if (solPriceUsd > 0) {
+        const poolPriceUsd = activePrice * solPriceUsd;
+        const deviationPct = Math.abs(poolPriceUsd - jupiterPriceUsd) / jupiterPriceUsd * 100;
+        if (deviationPct > maxDeviationPct) {
+          const errorMsg = `Price deviation ${deviationPct.toFixed(1)}% exceeds max ${maxDeviationPct}% (pool: $${poolPriceUsd.toFixed(6)}, jupiter: $${jupiterPriceUsd.toFixed(6)}). Refusing deploy to avoid arbitrage loss.`;
+          log("deploy", errorMsg);
+          return { success: false, error: errorMsg };
+        }
+        log("deploy", `Price deviation check passed: ${deviationPct.toFixed(1)}% (pool: $${poolPriceUsd.toFixed(6)}, jupiter: $${jupiterPriceUsd.toFixed(6)})`);
+      } else {
+        log("deploy", `Warning: SOL price unavailable — skipping deviation check`);
+      }
+    } else if (jupiterPriceUsd == null) {
+      log("deploy", `Warning: Jupiter price unavailable for ${baseMint.slice(0, 8)} — skipping deviation check`);
+    }
+  }
 
   if (downside_pct != null || upside_pct != null) {
     const downsidePct = Math.max(0, Number(downside_pct ?? 0));
