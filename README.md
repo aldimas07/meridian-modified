@@ -17,7 +17,6 @@ This fork (`meridian-modified`) includes everything from both upstream `main` an
 | Feature | Description |
 |---|---|
 | **GMGN Screening Pipeline** | Alternative screening source via GMGN API (`screeningSource: "gmgn"`). Adds smart degen count, KOL tracking, bundler rate, rug ratio, fresh wallet rate, sniper detection, and indicator-based filtering. Full config with `gmgn*` prefix keys. |
-| **Price Deviation Check** | Pre-deploy validation compares pool price against Jupiter market price. Rejects deploy if deviation exceeds `maxPriceDeviationPct` (default 5%). Prevents arbitrage loss from stale/manipulated pool prices. |
 | **Volatility-Based Strategy Selection** | Auto-selects `bid_ask` for low volatility (<4.0) and `spot` for high volatility (>=4.0). Enforced at code level in executor.js. Configurable via `strategyVolatilityThreshold`. |
 | **Chart Indicators (Bounce Mode)** | RSI + Bollinger Band bounce detection for entry timing. Configurable via `chartIndicators` object with `rsiLength`, `bounceInterval`, `rsiOversold`, `rsiOverbought`, `requireBbPosition`. |
 | **Repeat Deploy Cooldown** | Prevents re-deploying into the same token too quickly. Configurable trigger count, cooldown hours, scope (token/pool), and minimum fee earned threshold. |
@@ -148,12 +147,6 @@ START
 ┌─────────────────────┐
 │ Safety checks        │ bin_step, volatility, range width,
 │ (executor.js)        │ duplicate pool/token, cooldown
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Price deviation      │ Pool price vs Jupiter (max 5%)
-│ check                │ ← NEW: prevents arbitrage loss
 └──────────┬──────────┘
            │
            ▼
@@ -314,13 +307,7 @@ After N closes (darwinRecalcEvery):
 - Mitigation: Tool-level safety checks in executor.js (hard limits)
 - Gap: LLM still decides WHICH pool to deploy — prompt injection could bias selection
 
-**3. Oracle Manipulation**
-- Risk: Price deviation check relies on Jupiter API — if Jupiter is manipulated or stale, check fails
-- Attack vector: Flash loan manipulation of Jupiter aggregator, Jupiter API downtime
-- Mitigation: Graceful degradation (skip check if API unavailable)
-- Gap: No fallback oracle (e.g., Pyth, Switchboard)
-
-**4. Race Condition in Position Management**
+**3. Race Condition in Position Management**
 - Risk: 30s PnL poller + 10min management cycle can conflict
 - Scenario: Poller triggers trailing TP close → management cycle also tries to close → double tx
 - Mitigation: `_managementBusy` flag, confirmation delays
@@ -541,7 +528,6 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 | `maxBundlePct` | `30` | Maximum bundler % in top holders |
 | `maxBotHoldersPct` | `30` | Maximum bot holder % |
 | `maxTop10Pct` | `60` | Maximum top-10 holder concentration |
-| `maxPriceDeviationPct` | `5` | Max pool-vs-Jupiter price deviation % before deploy |
 | `blockedLaunchpads` | `[]` | Launchpad names to never deploy into |
 | `minTokenAgeHours` | `null` | Minimum token age (hours) |
 | `maxTokenAgeHours` | `null` | Maximum token age (hours) |

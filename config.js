@@ -103,7 +103,6 @@ export const config = {
     maxBundlePct:      u.maxBundlePct      ?? 30,  // max bundle holding % (OKX advanced-info)
     maxBotHoldersPct:  u.maxBotHoldersPct  ?? 30,  // max bot holder addresses % (Jupiter audit)
     maxTop10Pct:       u.maxTop10Pct       ?? 60,  // max top 10 holders concentration
-    maxPriceDeviationPct: u.maxPriceDeviationPct ?? 5,  // max pool-vs-Jupiter price deviation % before deploy
     allowedLaunchpads: u.allowedLaunchpads ?? [],  // allow-list launchpads, [] = no allow-list
     blockedLaunchpads:  u.blockedLaunchpads  ?? [],  // e.g. ["letsbonk.fun", "pump.fun"]
     minTokenAgeHours:   u.minTokenAgeHours   ?? null, // null = no minimum
@@ -386,7 +385,6 @@ export function reloadScreeningThresholds() {
     if (fresh.avoidPvpSymbols   !== undefined) s.avoidPvpSymbols = fresh.avoidPvpSymbols;
     if (fresh.blockPvpSymbols   !== undefined) s.blockPvpSymbols = fresh.blockPvpSymbols;
     if (fresh.maxBotHoldersPct  != null) s.maxBotHoldersPct = fresh.maxBotHoldersPct;
-    if (fresh.maxPriceDeviationPct != null) s.maxPriceDeviationPct = fresh.maxPriceDeviationPct;
     if (fresh.allowedLaunchpads !== undefined) s.allowedLaunchpads = fresh.allowedLaunchpads;
     if (fresh.blockedLaunchpads !== undefined) s.blockedLaunchpads = fresh.blockedLaunchpads;
     const minBinsBelow = numericConfig(fresh.minBinsBelow) ?? config.strategy.minBinsBelow;

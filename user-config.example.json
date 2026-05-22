@@ -33,7 +33,6 @@
   "maxBundlePct": 30,
   "maxBotHoldersPct": 30,
   "maxTop10Pct": 60,
-  "maxPriceDeviationPct": 5,
   "avoidPvpSymbols": true,
   "blockPvpSymbols": false,
   "allowedLaunchpads": [],
