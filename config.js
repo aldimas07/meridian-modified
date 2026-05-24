@@ -363,18 +363,23 @@ export function isWeekend() {
  * Based on performance analysis: weekends have higher volatility (3.90 vs 3.75),
  * lower win rate (57% vs 74%), and thinner liquidity.
  *
- * Adjustments:
- *   maxVolatility:  -0.7  (reject high-vol pools that are more likely to OOR)
- *   minOrganic:     +5    (require higher token quality)
- *   minHolders:     +200  (prefer more established tokens)
- *   minVolume:      +1000 (require deeper liquidity)
+ * Adjustments (proportional for maxVolatility to stay compatible with Darwin-evolved values):
+ *   maxVolatility:  ×0.85 floor 2.5 (reject high-vol pools, but not below usable range)
+ *   minOrganic:     +5              (require higher token quality)
+ *   minHolders:     +200            (prefer more established tokens)
+ *   minVolume:      +1000           (require deeper liquidity)
+ *
+ * Why proportional, not flat: Darwin may evolve maxVolatility down to ~2.7.
+ * Flat -0.7 would give 2.0, filtering nearly all pools (normal DLMM range: 2-4).
+ * Proportional 0.85x gives 2.3 → clamped to floor 2.5 (still usable).
  */
 export function getWeekendAdjustedScreening() {
   const s = config.screening;
   if (!isWeekend()) return s;
+  const base = s.maxVolatility ?? 5.0;
   return {
     ...s,
-    maxVolatility: Math.max(1.5, (s.maxVolatility ?? 5.0) - 0.7),
+    maxVolatility: Math.max(2.5, base * 0.85),
     minOrganic:    (s.minOrganic ?? 60) + 5,
     minHolders:    (s.minHolders ?? 500) + 200,
     minVolume:     (s.minVolume ?? 500) + 1000,
