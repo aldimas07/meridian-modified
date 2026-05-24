@@ -166,7 +166,10 @@ function sanitizeUntrustedPromptText(text, maxLen = 500) {
   if (!text) return null;
   // Hard reject if injection patterns detected
   if (containsInjectionPattern(text)) {
-    log("security", `Injection pattern detected in prompt text: ${String(text).slice(0, 100)}`);
+    log(
+      "security",
+      `Injection pattern detected in prompt text: ${String(text).slice(0, 100)}`,
+    );
     return null;
   }
   return sanitizeForPrompt(text, maxLen);
@@ -335,10 +338,13 @@ export async function runManagementCycle({ silent = false } = {}) {
             });
             return { pool: p.pool, indicator: result };
           } catch (e) {
-            log("management_warn", `Indicator fetch failed for ${p.pair}: ${e.message}`);
+            log(
+              "management_warn",
+              `Indicator fetch failed for ${p.pair}: ${e.message}`,
+            );
             return { pool: p.pool, indicator: null };
           }
-        })
+        }),
       );
       for (let i = 0; i < positionData.length; i++) {
         const r = indicatorResults[i];
@@ -350,9 +356,12 @@ export async function runManagementCycle({ silent = false } = {}) {
         }
       }
       const successCount = indicatorResults.filter(
-        (r) => r.status === "fulfilled" && r.value.indicator
+        (r) => r.status === "fulfilled" && r.value.indicator,
       ).length;
-      log("management", `Indicators fetched: ${successCount}/${positionData.length} positions`);
+      log(
+        "management",
+        `Indicators fetched: ${successCount}/${positionData.length} positions`,
+      );
     }
 
     // JS trailing TP check
@@ -423,13 +432,20 @@ export async function runManagementCycle({ silent = false } = {}) {
             pool_address: p.pool,
             timeframe: config.management.deadFlowExitTimeframe || "30m",
           });
-          const deadFlowRule = getDeterministicCloseRule(p, config.management, poolDetail);
+          const deadFlowRule = getDeterministicCloseRule(
+            p,
+            config.management,
+            poolDetail,
+          );
           if (deadFlowRule) {
             actionMap.set(p.position, deadFlowRule);
             continue;
           }
         } catch (e) {
-          log("management_warn", `Dead-flow pool fetch failed for ${p.pair}: ${e.message}`);
+          log(
+            "management_warn",
+            `Dead-flow pool fetch failed for ${p.pair}: ${e.message}`,
+          );
         }
       }
       const claimableUsd =
@@ -486,7 +502,12 @@ export async function runManagementCycle({ silent = false } = {}) {
         : `$${p.unclaimed_fees_usd ?? "?"}`;
       const statusLabel =
         act.action === "INSTRUCTION" ? "HOLD (instruction)" : act.action;
-      const binBar = formatBinProgress(p.lower_bin, p.upper_bin, p.active_bin, 20);
+      const binBar = formatBinProgress(
+        p.lower_bin,
+        p.upper_bin,
+        p.active_bin,
+        20,
+      );
       let line = `${p.pair} | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
       if (binBar) line += `\nBin: ${binBar}`;
       if (p.instruction) line += `\nNote: "${p.instruction}"`;
@@ -509,7 +530,9 @@ export async function runManagementCycle({ silent = false } = {}) {
           sig.supertrendDirection ? `ST=${sig.supertrendDirection}` : null,
           sig.rsi != null ? `RSI=${sig.rsi}` : null,
           sig.bbPosition ? `BB=${sig.bbPosition}` : null,
-        ].filter(Boolean).join(" | ");
+        ]
+          .filter(Boolean)
+          .join(" | ");
         if (parts) line += `\n📊 ${parts}`;
       }
       return line;
@@ -553,11 +576,19 @@ export async function runManagementCycle({ silent = false } = {}) {
             ? (() => {
                 const sig = p.mgmt_indicator_signal;
                 const parts = [
-                  sig.supertrendDirection ? `supertrend=${sig.supertrendDirection}${sig.supertrendBreakUp ? " (breakup)" : ""}` : null,
-                  sig.rsi != null ? `rsi=${sig.rsi} ${sig.rsiLabel || ""}`.trim() : null,
+                  sig.supertrendDirection
+                    ? `supertrend=${sig.supertrendDirection}${sig.supertrendBreakUp ? " (breakup)" : ""}`
+                    : null,
+                  sig.rsi != null
+                    ? `rsi=${sig.rsi} ${sig.rsiLabel || ""}`.trim()
+                    : null,
                   sig.bbPosition ? `bb=${sig.bbPosition}` : null,
-                ].filter(Boolean).join(" | ");
-                return parts ? `  indicators [${sig.interval || "15m"}]: ${parts}` : null;
+                ]
+                  .filter(Boolean)
+                  .join(" | ");
+                return parts
+                  ? `  indicators [${sig.interval || "15m"}]: ${parts}`
+                  : null;
               })()
             : null;
           return [
@@ -726,7 +757,10 @@ export async function runScreeningCycle({ silent = false } = {}) {
     );
   }
   timers.screeningLastRun = Date.now();
-  log("cron", `Starting screening cycle [source: ${config.screening.source || "meteora"} | model: ${config.llm.screeningModel}]`);
+  log(
+    "cron",
+    `Starting screening cycle [source: ${config.screening.source || "meteora"} | model: ${config.llm.screeningModel}]`,
+  );
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
@@ -756,7 +790,11 @@ export async function runScreeningCycle({ silent = false } = {}) {
     const gmgnAllFiltered = topCandidates?.all_filtered ?? [];
 
     if (gmgnStageCounts) {
-      const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
+      const funnelBlock = buildGmgnFunnelReport(
+        gmgnStageCounts,
+        gmgnAllFiltered,
+        { fromStage: 2 },
+      );
       if (funnelBlock) log("screening", `GMGN funnel:\n${funnelBlock}`);
     }
 
@@ -961,15 +999,25 @@ export async function runScreeningCycle({ silent = false } = {}) {
               ? `  okx: unavailable`
               : null,
           okxTags ? `  tags: ${okxTags}` : null,
-          pool.indicator_signal ? (() => {
-            const sig = pool.indicator_signal;
-            const parts = [
-              sig.supertrendDirection ? `supertrend=${sig.supertrendDirection}${sig.supertrendBreakUp ? " (breakup)" : ""}` : null,
-              sig.rsi != null ? `rsi=${sig.rsi} ${sig.rsiLabel || ""}`.trim() : null,
-              sig.bbPosition ? `bb=${sig.bbPosition}` : null,
-            ].filter(Boolean).join(" | ");
-            return parts ? `  indicators [${sig.interval || "15m"}]: ${parts}` : null;
-          })() : null,
+          pool.indicator_signal
+            ? (() => {
+                const sig = pool.indicator_signal;
+                const parts = [
+                  sig.supertrendDirection
+                    ? `supertrend=${sig.supertrendDirection}${sig.supertrendBreakUp ? " (breakup)" : ""}`
+                    : null,
+                  sig.rsi != null
+                    ? `rsi=${sig.rsi} ${sig.rsiLabel || ""}`.trim()
+                    : null,
+                  sig.bbPosition ? `bb=${sig.bbPosition}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" | ");
+                return parts
+                  ? `  indicators [${sig.interval || "15m"}]: ${parts}`
+                  : null;
+              })()
+            : null,
           pool.price_vs_ath_pct != null
             ? `  ath: price_vs_ath=${pool.price_vs_ath_pct}%${pool.top_cluster_trend ? `, top_cluster=${pool.top_cluster_trend}` : ""}`
             : null,
@@ -986,9 +1034,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
             : null,
         ];
       }
-      block = block
-        .filter(Boolean)
-        .join("\n");
+      block = block.filter(Boolean).join("\n");
 
       // Stage signals for Darwinian weighting — captured before LLM decides
       if (config.darwin?.enabled) {
@@ -1292,7 +1338,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
     } finally {
       _pnlPollBusy = false;
     }
-  }, 30_000);
+  }, 20_000);
 
   _cronTasks = [
     mgmtTask,
@@ -1345,7 +1391,11 @@ function formatCandidates(candidates) {
   ].join("\n");
 }
 
-function buildGmgnFunnelReport(stageCounts, allFiltered = [], { fromStage = 1 } = {}) {
+function buildGmgnFunnelReport(
+  stageCounts,
+  allFiltered = [],
+  { fromStage = 1 } = {},
+) {
   if (!stageCounts) return null;
   const sc = stageCounts;
   const funnel = `GMGN funnel: ranked=${sc.ranked ?? "?"} → S1=${sc.s1 ?? "?"} → S2=${sc.s2 ?? "?"} → S3=${sc.s3 ?? "?"} → S4=${sc.s4 ?? "?"} → final=${sc.s5 ?? "?"}`;
@@ -1356,14 +1406,26 @@ function buildGmgnFunnelReport(stageCounts, allFiltered = [], { fromStage = 1 } 
     if (!byStage[key]) byStage[key] = [];
     byStage[key].push(`${f.name}: ${f.reason}`);
   }
-  const stageLabels = { s2: "S2 info", s3: "S3 pool", s4: "S4 indicators", s5: "S5 pick" };
+  const stageLabels = {
+    s2: "S2 info",
+    s3: "S3 pool",
+    s4: "S4 indicators",
+    s5: "S5 pick",
+  };
   const details = Object.entries(byStage)
-    .map(([key, items]) => `${stageLabels[key] || key}:\n${items.map(r => `  • ${r}`).join("\n")}`)
+    .map(
+      ([key, items]) =>
+        `${stageLabels[key] || key}:\n${items.map((r) => `  • ${r}`).join("\n")}`,
+    )
     .join("\n");
   return details ? `${funnel}\n\n${details}` : funnel;
 }
 
-function getDeterministicCloseRule(position, managementConfig, poolData = null) {
+function getDeterministicCloseRule(
+  position,
+  managementConfig,
+  poolData = null,
+) {
   const tracked = getTrackedPosition(position.position);
   const pnlSuspect = (() => {
     if (position.pnl_pct == null) return false;
@@ -1423,7 +1485,9 @@ function getDeterministicCloseRule(position, managementConfig, poolData = null) 
     position.unclaimed_fees_true_usd ?? position.unclaimed_fees_usd ?? 0,
   );
   const ageMinutes = Number(position.age_minutes ?? 0);
-  const peakPnlPct = Number(tracked?.peak_pnl_pct ?? position.peak_pnl_pct ?? 0);
+  const peakPnlPct = Number(
+    tracked?.peak_pnl_pct ?? position.peak_pnl_pct ?? 0,
+  );
 
   if (
     !pnlSuspect &&
@@ -1432,7 +1496,8 @@ function getDeterministicCloseRule(position, managementConfig, poolData = null) 
     position.in_range === true &&
     pnlPct <= (managementConfig.feeDecayExitPnlPct ?? -5) &&
     pnlUsd < 0 &&
-    feesUsd < Math.abs(pnlUsd) * (managementConfig.feeDecayExitCoverageRatio ?? 0.5)
+    feesUsd <
+      Math.abs(pnlUsd) * (managementConfig.feeDecayExitCoverageRatio ?? 0.5)
   ) {
     return {
       action: "CLOSE",
@@ -1461,7 +1526,7 @@ function getDeterministicCloseRule(position, managementConfig, poolData = null) 
     managementConfig.deadFlowExitEnabled &&
     position.in_range === true &&
     ageMinutes >= (managementConfig.deadFlowExitAgeMinutes ?? 180) &&
-    feesUsd < (managementConfig.deadFlowExitUnclaimedUsd ?? 0.10) &&
+    feesUsd < (managementConfig.deadFlowExitUnclaimedUsd ?? 0.1) &&
     pnlPct > 0
   ) {
     const poolVolume = Number(poolData.volume_window ?? poolData.volume ?? 0);
@@ -1492,19 +1557,31 @@ function getClosestRule(position, managementConfig, tracked = null) {
   const pnlPct = Number(position.pnl_pct ?? 0);
   const ageMin = Number(position.age_minutes ?? 0);
   const peakPnl = Number(tracked?.peak_pnl_pct ?? position.peak_pnl_pct ?? 0);
-  const feesUsd = Number(position.unclaimed_fees_true_usd ?? position.unclaimed_fees_usd ?? 0);
+  const feesUsd = Number(
+    position.unclaimed_fees_true_usd ?? position.unclaimed_fees_usd ?? 0,
+  );
   const pnlUsd = Number(position.pnl_true_usd ?? position.pnl_usd ?? 0);
 
   // Rule 1: Stop loss
   if (managementConfig.stopLossPct != null) {
     const dist = pnlPct - managementConfig.stopLossPct;
-    rules.push({ rule: 1, distance: dist, label: "Stop Loss", atRisk: dist <= Math.abs(managementConfig.stopLossPct) * 0.3 });
+    rules.push({
+      rule: 1,
+      distance: dist,
+      label: "Stop Loss",
+      atRisk: dist <= Math.abs(managementConfig.stopLossPct) * 0.3,
+    });
   }
 
   // Rule 2: Take profit
   if (managementConfig.takeProfitPct != null) {
     const dist = managementConfig.takeProfitPct - pnlPct;
-    rules.push({ rule: 2, distance: dist, label: "Take Profit", atRisk: dist <= managementConfig.takeProfitPct * 0.3 });
+    rules.push({
+      rule: 2,
+      distance: dist,
+      label: "Take Profit",
+      atRisk: dist <= managementConfig.takeProfitPct * 0.3,
+    });
   }
 
   // Rule 3: Pumped far above range
@@ -1514,27 +1591,51 @@ function getClosestRule(position, managementConfig, tracked = null) {
     if (binsAbove > 0) {
       // Already above range: gap to instant close
       const dist = threshold - binsAbove;
-      rules.push({ rule: 3, distance: dist, label: "Pumped Above Range", atRisk: dist <= threshold * 0.3 });
+      rules.push({
+        rule: 3,
+        distance: dist,
+        label: "Pumped Above Range",
+        atRisk: dist <= threshold * 0.3,
+      });
     } else {
       // Still in range: distance to upper_bin + threshold
       const dist = Math.abs(binsAbove) + threshold;
-      rules.push({ rule: 3, distance: dist, label: "Pumped Above Range", atRisk: false });
+      rules.push({
+        rule: 3,
+        distance: dist,
+        label: "Pumped Above Range",
+        atRisk: false,
+      });
     }
   }
 
   // Rule 4: OOR timer (above-range only)
-  if (position.active_bin != null && position.upper_bin != null && position.active_bin > position.upper_bin) {
+  if (
+    position.active_bin != null &&
+    position.upper_bin != null &&
+    position.active_bin > position.upper_bin
+  ) {
     const oorMin = position.minutes_out_of_range ?? 0;
     const threshold = managementConfig.outOfRangeWaitMinutes ?? 30;
     const dist = threshold - oorMin;
-    rules.push({ rule: 4, distance: dist, label: "OOR Timer", atRisk: dist <= threshold * 0.3 });
+    rules.push({
+      rule: 4,
+      distance: dist,
+      label: "OOR Timer",
+      atRisk: dist <= threshold * 0.3,
+    });
   }
 
   // Rule 5: Low yield
   if (position.fee_per_tvl_24h != null && ageMin >= 60) {
     const threshold = managementConfig.minFeePerTvl24h ?? 7;
     const dist = position.fee_per_tvl_24h - threshold;
-    rules.push({ rule: 5, distance: dist, label: "Low Yield", atRisk: dist <= threshold * 0.3 });
+    rules.push({
+      rule: 5,
+      distance: dist,
+      label: "Low Yield",
+      atRisk: dist <= threshold * 0.3,
+    });
   }
 
   // Rule 6: Fee-decay exit (AND condition: use max of gaps)
@@ -1544,21 +1645,36 @@ function getClosestRule(position, managementConfig, tracked = null) {
     const ageDist = ageThreshold - ageMin;
     const pnlDist = pnlPct - pnlThreshold;
     const dist = Math.max(ageDist, pnlDist);
-    rules.push({ rule: 6, distance: dist, label: "Fee-Decay Exit", atRisk: dist <= 30 });
+    rules.push({
+      rule: 6,
+      distance: dist,
+      label: "Fee-Decay Exit",
+      atRisk: dist <= 30,
+    });
   }
 
   // Rule 7: Profit-decay exit
   if (managementConfig.profitDecayExitEnabled) {
     const ageThreshold = managementConfig.profitDecayExitAgeMinutes ?? 180;
     const dist = ageThreshold - ageMin;
-    rules.push({ rule: 7, distance: dist, label: "Profit-Decay Exit", atRisk: dist <= 30 });
+    rules.push({
+      rule: 7,
+      distance: dist,
+      label: "Profit-Decay Exit",
+      atRisk: dist <= 30,
+    });
   }
 
   // Rule 8: Dead-flow exit (partial — pool data not available here)
   if (managementConfig.deadFlowExitEnabled) {
     const ageThreshold = managementConfig.deadFlowExitAgeMinutes ?? 180;
     const dist = ageThreshold - ageMin;
-    rules.push({ rule: 8, distance: dist, label: "Dead-Flow Exit", atRisk: dist <= 30 });
+    rules.push({
+      rule: 8,
+      distance: dist,
+      label: "Dead-Flow Exit",
+      atRisk: dist <= 30,
+    });
   }
 
   // Trailing TP
@@ -1566,11 +1682,21 @@ function getClosestRule(position, managementConfig, tracked = null) {
     if (tracked?.trailing_active) {
       const dropFromPeak = peakPnl - pnlPct;
       const dist = (managementConfig.trailingDropPct ?? 1.5) - dropFromPeak;
-      rules.push({ rule: "T", distance: dist, label: "Trailing TP", atRisk: dist <= 0.5 });
+      rules.push({
+        rule: "T",
+        distance: dist,
+        label: "Trailing TP",
+        atRisk: dist <= 0.5,
+      });
     } else {
       const dist = (managementConfig.trailingTriggerPct ?? 3) - peakPnl;
       if (dist > 0) {
-        rules.push({ rule: "T", distance: dist, label: "Trailing TP (inactive)", atRisk: dist <= 1 });
+        rules.push({
+          rule: "T",
+          distance: dist,
+          label: "Trailing TP (inactive)",
+          atRisk: dist <= 1,
+        });
       }
     }
   }
@@ -1586,7 +1712,7 @@ function getClosestRule(position, managementConfig, tracked = null) {
 function formatClosestRule(rules) {
   if (!rules || rules.length === 0) return null;
   const nearest = rules[0];
-  const atRisk = rules.filter(r => r.atRisk && r !== nearest);
+  const atRisk = rules.filter((r) => r.atRisk && r !== nearest);
   let text = `Nearest: ${nearest.label}`;
   if (nearest.distance <= 0) {
     text += " (TRIGGERED)";
@@ -1594,7 +1720,7 @@ function formatClosestRule(rules) {
     text += ` (gap: ${nearest.distance.toFixed(2)})`;
   }
   if (atRisk.length > 0) {
-    text += ` | Also at risk: ${atRisk.map(r => r.label).join(", ")}`;
+    text += ` | Also at risk: ${atRisk.map((r) => r.label).join(", ")}`;
   }
   return text;
 }
@@ -2205,7 +2331,12 @@ async function telegramHandler(msg) {
             : `-${cur}${Math.abs(p.pnl_usd)}`;
         const age = p.age_minutes != null ? `${p.age_minutes}m` : "?";
         const oor = !p.in_range ? " ⚠️OOR" : "";
-        const bar = formatBinProgress(p.lower_bin, p.upper_bin, p.active_bin, 15);
+        const bar = formatBinProgress(
+          p.lower_bin,
+          p.upper_bin,
+          p.active_bin,
+          15,
+        );
         const barStr = bar ? ` | ${bar}` : "";
         return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}${barStr}`;
       });
@@ -2228,7 +2359,12 @@ async function telegramHandler(msg) {
         return;
       }
       const pos = positions[idx];
-      const binBar = formatBinProgress(pos.lower_bin, pos.upper_bin, pos.active_bin, 20);
+      const binBar = formatBinProgress(
+        pos.lower_bin,
+        pos.upper_bin,
+        pos.active_bin,
+        20,
+      );
       await sendMessage(
         [
           `${idx + 1}. ${pos.pair}`,
@@ -2702,7 +2838,12 @@ Commands:
     // ── Number pick: deploy into pool N (only if input is JUST a number) ─────
     const pick = parseInt(input);
     const latest = getLatestCandidatesMeta().candidates;
-    if (/^\d+$/.test(input.trim()) && !isNaN(pick) && pick >= 1 && pick <= latest.length) {
+    if (
+      /^\d+$/.test(input.trim()) &&
+      !isNaN(pick) &&
+      pick >= 1 &&
+      pick <= latest.length
+    ) {
       await runBusy(async () => {
         const pool = latest[pick - 1];
         console.log(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`);
