@@ -179,7 +179,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       if (config.darwin?.enabled) weightsSummary = getWeightsSummary();
     } catch { /* signal-weights not critical */ }
   }
-  const systemPrompt = buildSystemPrompt(agentType, portfolio, positions, stateSummary, lessons, perfSummary, weightsSummary, decisionSummary);
+  const systemPrompt = await buildSystemPrompt(agentType, portfolio, positions, stateSummary, lessons, perfSummary, weightsSummary, decisionSummary);
 
   let providerMode = "system";
   let messages = buildMessages(systemPrompt, sessionHistory, goal, providerMode);

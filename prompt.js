@@ -11,7 +11,7 @@
  */
 import { config } from "./config.js";
 
-export function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, lessons = null, perfSummary = null, weightsSummary = null, decisionSummary = null) {
+export async function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, lessons = null, perfSummary = null, weightsSummary = null, decisionSummary = null) {
   const s = config.screening;
 
   // MANAGER gets a leaner prompt — positions are pre-loaded in the goal, not repeated here
