@@ -351,6 +351,37 @@ export function computeDeployAmount(walletSol) {
 }
 
 /**
+ * Returns true if current UTC day is Saturday (6) or Sunday (0).
+ */
+export function isWeekend() {
+  const day = new Date().getUTCDay();
+  return day === 0 || day === 6;
+}
+
+/**
+ * Returns weekend-adjusted screening thresholds.
+ * Based on performance analysis: weekends have higher volatility (3.90 vs 3.75),
+ * lower win rate (57% vs 74%), and thinner liquidity.
+ *
+ * Adjustments:
+ *   maxVolatility:  -0.7  (reject high-vol pools that are more likely to OOR)
+ *   minOrganic:     +5    (require higher token quality)
+ *   minHolders:     +200  (prefer more established tokens)
+ *   minVolume:      +1000 (require deeper liquidity)
+ */
+export function getWeekendAdjustedScreening() {
+  const s = config.screening;
+  if (!isWeekend()) return s;
+  return {
+    ...s,
+    maxVolatility: Math.max(1.5, (s.maxVolatility ?? 5.0) - 0.7),
+    minOrganic:    (s.minOrganic ?? 60) + 5,
+    minHolders:    (s.minHolders ?? 500) + 200,
+    minVolume:     (s.minVolume ?? 500) + 1000,
+  };
+}
+
+/**
  * Reload user-config.json and apply updated screening thresholds to the
  * in-memory config object. Called after threshold evolution so the next
  * agent cycle uses the evolved values without a restart.

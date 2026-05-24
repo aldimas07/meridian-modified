@@ -100,6 +100,9 @@ function getRawPoolScreeningRejectReason(pool, s) {
   if (!isUsableVolatility(volatility)) {
     return `volatility ${volatility ?? "unknown"} is unusable`;
   }
+  if (Number.isFinite(s.maxVolatility) && Number.isFinite(volatility) && volatility > s.maxVolatility) {
+    return `volatility ${volatility.toFixed(2)} above maxVolatility ${s.maxVolatility}`;
+  }
   if (baseOrganic == null || baseOrganic < s.minOrganic) {
     return `base organic ${baseOrganic ?? "unknown"} below minOrganic ${s.minOrganic}`;
   }
@@ -276,7 +279,11 @@ async function enrichPvpRisk(pools) {
 export async function discoverPools({
   page_size = 50,
 } = {}) {
-  const s = config.screening;
+  const { getWeekendAdjustedScreening, isWeekend } = await import("../config.js");
+  const s = getWeekendAdjustedScreening();
+  if (isWeekend()) {
+    log("screening", `Weekend mode: maxVol=${s.maxVolatility?.toFixed(1)} minOrganic=${s.minOrganic} minHolders=${s.minHolders} minVolume=${s.minVolume}`);
+  }
   const filters = [
     "base_token_has_critical_warnings=false",
     "quote_token_has_critical_warnings=false",
@@ -426,7 +433,7 @@ export async function discoverPools({
  * Hard filters applied in code, agent decides which to deploy into.
  */
 export async function getTopCandidates({ limit = 10 } = {}) {
-  const { config } = await import("../config.js");
+  const { config, getWeekendAdjustedScreening } = await import("../config.js");
   const source = String(config.screening.source || "meteora").toLowerCase();
   if (!["meteora", "gmgn"].includes(source)) {
     throw new Error(`Invalid screeningSource: ${config.screening.source}. Use meteora or gmgn.`);
@@ -461,11 +468,12 @@ export async function getTopCandidates({ limit = 10 } = {}) {
   const { positions } = await getMyPositions();
   const occupiedPools = new Set(positions.map((p) => p.pool));
   const occupiedMints = new Set(positions.map((p) => p.base_mint).filter(Boolean));
+  const screeningConfig = getWeekendAdjustedScreening();
   const minTvl = source === "gmgn"
-    ? Number(config.gmgn.minTvl ?? config.screening.minTvl ?? 0)
-    : Number(config.screening.minTvl ?? 0);
-  const maxTvl = config.screening.maxTvl == null ? null : Number(config.screening.maxTvl);
-  const minFeeActiveTvlRatio = Number(config.screening.minFeeActiveTvlRatio ?? 0);
+    ? Number(config.gmgn.minTvl ?? screeningConfig.minTvl ?? 0)
+    : Number(screeningConfig.minTvl ?? 0);
+  const maxTvl = screeningConfig.maxTvl == null ? null : Number(screeningConfig.maxTvl);
+  const minFeeActiveTvlRatio = Number(screeningConfig.minFeeActiveTvlRatio ?? 0);
 
   const eligible = pools
     .filter((p) => {
@@ -485,6 +493,10 @@ export async function getTopCandidates({ limit = 10 } = {}) {
       }
       if (!isUsableVolatility(p.volatility)) {
         pushFilteredReason(filteredOut, p, `volatility ${p.volatility ?? "unknown"} is unusable`);
+        return false;
+      }
+      if (Number.isFinite(screeningConfig.maxVolatility) && Number(p.volatility) > screeningConfig.maxVolatility) {
+        pushFilteredReason(filteredOut, p, `volatility ${Number(p.volatility).toFixed(2)} above maxVolatility ${screeningConfig.maxVolatility}`);
         return false;
       }
       if (occupiedPools.has(p.pool)) {
