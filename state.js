@@ -474,6 +474,85 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   return null;
 }
 
+// ─── Indicator Exit Tracking ────────────────────────────────────
+
+/**
+ * Update bearish signal count for a position.
+ * Returns { count, firstBearishAt } for the position.
+ */
+export function updateIndicatorBearishCount(position_address, isBearish) {
+  const state = load();
+  const pos = state.positions[position_address];
+  if (!pos || pos.closed) return { count: 0, firstBearishAt: null };
+
+  if (isBearish) {
+    if (!pos.indicator_bearish_count) {
+      pos.indicator_bearish_count = 1;
+      pos.indicator_bearish_since = new Date().toISOString();
+    } else {
+      pos.indicator_bearish_count++;
+    }
+  } else {
+    // Reset counter when signal clears
+    pos.indicator_bearish_count = 0;
+    pos.indicator_bearish_since = null;
+  }
+  save(state);
+
+  return {
+    count: pos.indicator_bearish_count || 0,
+    firstBearishAt: pos.indicator_bearish_since || null,
+  };
+}
+
+/**
+ * Check if indicator exit can trigger (cooldown check).
+ */
+export function canTriggerIndicatorExit(position_address, cooldownMinutes) {
+  const state = load();
+  const pos = state.positions[position_address];
+  if (!pos) return false;
+
+  const lastExit = pos.indicator_last_exit_at
+    ? new Date(pos.indicator_last_exit_at).getTime()
+    : 0;
+  const cooldownMs = cooldownMinutes * 60 * 1000;
+  return Date.now() - lastExit >= cooldownMs;
+}
+
+/**
+ * Record that indicator exit was triggered for a position.
+ */
+export function recordIndicatorExitTrigger(position_address) {
+  const state = load();
+  const pos = state.positions[position_address];
+  if (!pos) return;
+  pos.indicator_last_exit_at = new Date().toISOString();
+  pos.indicator_bearish_count = 0;
+  pos.indicator_bearish_since = null;
+  save(state);
+}
+
+/**
+ * Get last indicator check timestamp for a position.
+ */
+export function getLastIndicatorCheckAt(position_address) {
+  const state = load();
+  const pos = state.positions[position_address];
+  return pos?.indicator_last_checked_at || null;
+}
+
+/**
+ * Record indicator check timestamp for a position.
+ */
+export function setLastIndicatorCheckAt(position_address) {
+  const state = load();
+  const pos = state.positions[position_address];
+  if (!pos) return;
+  pos.indicator_last_checked_at = new Date().toISOString();
+  save(state);
+}
+
 // ─── Briefing Tracking ─────────────────────────────────────────
 
 /**

@@ -40,6 +40,11 @@ import {
   queueTrailingDropConfirmation,
   resolvePendingTrailingDrop,
   reconcilePeakFromPnl,
+  updateIndicatorBearishCount,
+  canTriggerIndicatorExit,
+  recordIndicatorExitTrigger,
+  getLastIndicatorCheckAt,
+  setLastIndicatorCheckAt,
 } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import {
@@ -49,7 +54,7 @@ import {
 } from "./pool-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
-import { confirmBounceSetup } from "./tools/chart-indicators.js";
+import { confirmBounceSetup, fetchChartIndicatorsForMint, evaluatePreset } from "./tools/chart-indicators.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
@@ -1368,6 +1373,64 @@ Summarize the current portfolio health, total fees earned, and performance of al
             );
           }
           break;
+        }
+        // ── Indicator-based early exit check ──────────────────────
+        if (config.indicators.exitIndicatorEnabled && p.base_mint) {
+          const checkIntervalMs = (config.indicators.exitIndicatorCheckIntervalSeconds ?? 120) * 1000;
+          const lastChecked = getLastIndicatorCheckAt(p.position);
+          const sinceLastCheck = lastChecked ? Date.now() - new Date(lastChecked).getTime() : Infinity;
+
+          if (sinceLastCheck >= checkIntervalMs) {
+            setLastIndicatorCheckAt(p.position);
+            try {
+              const indicatorPayload = await fetchChartIndicatorsForMint(p.base_mint, {
+                interval: config.indicators.intervals?.[0] ?? "5_MINUTE",
+              });
+              const preset = config.indicators.exitIndicatorPreset ?? "rsi_plus_supertrend";
+              const exitSignal = evaluatePreset("exit", preset, indicatorPayload);
+              const isBearish = exitSignal?.confirmed ?? false;
+
+              const { count } = updateIndicatorBearishCount(p.position, isBearish);
+              const minConfirmations = config.indicators.exitIndicatorConfirmations ?? 3;
+              const minPnl = config.indicators.exitIndicatorMinPnlPct ?? -2;
+              const cooldownMin = config.indicators.exitIndicatorCooldownMinutes ?? 5;
+
+              if (isBearish) {
+                log(
+                  "state",
+                  `[Indicator exit] ${p.pair} — bearish signal (${preset}): ${exitSignal?.reason} — confirmation ${count}/${minConfirmations}`,
+                );
+              }
+
+              if (
+                count >= minConfirmations &&
+                (p.pnl_pct ?? 0) < minPnl &&
+                canTriggerIndicatorExit(p.position, cooldownMin)
+              ) {
+                recordIndicatorExitTrigger(p.position);
+                const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
+                const sinceLastTrigger = Date.now() - _pollTriggeredAt;
+                if (sinceLastTrigger >= cooldownMs) {
+                  _pollTriggeredAt = Date.now();
+                  log(
+                    "state",
+                    `[PnL poll] Indicator exit: ${p.pair} — ${preset} confirmed ${count}x, PnL ${p.pnl_pct?.toFixed(2)}% — triggering management (URGENT)`,
+                  );
+                  runManagementCycle({ silent: true }).catch((e) =>
+                    log("cron_error", `Poll-triggered management failed: ${e.message}`),
+                  );
+                } else {
+                  log(
+                    "state",
+                    `[PnL poll] Indicator exit: ${p.pair} — ${preset} confirmed ${count}x — cooldown (${Math.round((cooldownMs - sinceLastTrigger) / 1000)}s left)`,
+                  );
+                }
+                break;
+              }
+            } catch (e) {
+              log("cron_warn", `[Indicator exit] ${p.pair} — fetch failed: ${e.message}`);
+            }
+          }
         }
       }
     } finally {
