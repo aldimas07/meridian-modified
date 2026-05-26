@@ -703,9 +703,11 @@ async function runSafetyChecks(name, args) {
         if (requestedVolatility >= volThreshold && requestedStrategy !== "spot") {
           enforcedStrategy = "spot";
           console.log(`[executor] volatility ${requestedVolatility.toFixed(2)} >= ${volThreshold} → overriding strategy ${requestedStrategy} → spot`);
+          args._strategyOverride = `Strategy auto-switched from ${requestedStrategy} to spot (volatility ${requestedVolatility.toFixed(2)} >= ${volThreshold} threshold)`;
         } else if (requestedVolatility < volThreshold && requestedStrategy !== "bid_ask") {
           enforcedStrategy = "bid_ask";
           console.log(`[executor] volatility ${requestedVolatility.toFixed(2)} < ${volThreshold} → overriding strategy ${requestedStrategy} → bid_ask`);
+          args._strategyOverride = `Strategy auto-switched from ${requestedStrategy} to bid_ask (volatility ${requestedVolatility.toFixed(2)} < ${volThreshold} threshold)`;
         }
       }
       args.strategy = enforcedStrategy;

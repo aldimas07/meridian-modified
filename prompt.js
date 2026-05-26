@@ -134,7 +134,7 @@ POOL MEMORY: Past losses or problems → strong skip signal.
 DEPLOY RULES:
 - COMPOUNDING: Use the deploy amount from the goal EXACTLY. Do NOT default to a smaller number.
 - bins_below = round(config.strategy.minBinsBelow + (candidate volatility/5)*(config.strategy.maxBinsBelow-config.strategy.minBinsBelow)) clamped to [minBinsBelow,maxBinsBelow]. Volatility must be a positive number; 0/unknown means skip.
-- STRATEGY SELECTION by volatility: if candidate volatility >= ${config.screening.strategyVolatilityThreshold ?? 4.0}, use strategy "spot". If volatility < ${config.screening.strategyVolatilityThreshold ?? 4.0}, use strategy "bid_ask". The executor enforces this — wrong strategy is auto-overridden.
+- STRATEGY SELECTION by volatility: if candidate volatility >= ${config.screening.strategyVolatilityThreshold ?? 4.0}, use strategy "spot". If volatility < ${config.screening.strategyVolatilityThreshold ?? 4.0}, use strategy "bid_ask". The executor enforces this — wrong strategy is auto-overridden. IMPORTANT: In your final answer, report the ACTUAL strategy from the tool result's "strategy" field, NOT what you requested. If "strategy_note" is present, it means the executor overrode your choice — include that info.
 - Use amount_y only, keep amount_x=0 and bins_above=0.
 - Bin steps must be [80-125].
 - Pick ONE pool only when conviction is real. If only one weak candidate survives, skip and explain why none qualify.

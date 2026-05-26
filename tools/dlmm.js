@@ -497,6 +497,7 @@ export async function deployPosition({
   fee_tvl_ratio,
   organic_score,
   initial_value_usd,
+  _strategyOverride, // note from executor when strategy was auto-overridden
 }) {
   pool_address = normalizeMint(pool_address);
   const activeStrategy = strategy || config.strategy.strategy;
@@ -921,6 +922,7 @@ export async function deployPosition({
       bin_step: actualBinStep,
       base_fee: actualBaseFee,
       strategy: activeStrategy,
+      strategy_note: _strategyOverride || null,
       wide_range: isWideRange,
       amount_x: finalAmountX,
       amount_y: finalAmountY,

@@ -819,6 +819,33 @@ export async function runScreeningCycle({ silent = false } = {}) {
       await new Promise((r) => setTimeout(r, 150)); // avoid 429s
     }
 
+    // Retry bot-holder data for candidates where getTokenInfo failed (network blip protection)
+    const RETRY_DELAY_MS = 500;
+    const MAX_RETRIES = 2;
+    for (const entry of allCandidates) {
+      if (entry.ti?.audit?.bot_holders_pct != null) continue; // already has data
+      const mint = entry.pool.base?.mint;
+      if (!mint) continue;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        log("screening", `Retry ${attempt}/${MAX_RETRIES} bot-holder data for ${entry.pool.name} (${mint.slice(0, 8)})`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+        try {
+          const retryResult = await getTokenInfo({ query: mint });
+          const retryTi = retryResult?.results?.[0];
+          if (retryTi?.audit?.bot_holders_pct != null) {
+            entry.ti = retryTi;
+            log("screening", `Retry succeeded for ${entry.pool.name} — bots ${retryTi.audit.bot_holders_pct}%`);
+            break;
+          }
+        } catch (e) {
+          log("screening", `Retry ${attempt} failed for ${entry.pool.name}: ${e.message}`);
+        }
+        if (attempt === MAX_RETRIES) {
+          log("screening", `Bot-holder data unavailable for ${entry.pool.name} after ${MAX_RETRIES} retries — applying conservative ceiling`);
+        }
+      }
+    }
+
     // Hard filters after token recon — block launchpads and excessive Jupiter bot holders
     const filteredOut = [];
     const passing = allCandidates.filter(({ pool, ti }) => {
@@ -849,20 +876,26 @@ export async function runScreeningCycle({ silent = false } = {}) {
         });
         return false;
       }
-      const botPct = ti?.audit?.bot_holders_pct;
+      const botPctRaw = ti?.audit?.bot_holders_pct;
       const maxBotHoldersPct = config.screening.maxBotHoldersPct;
+      // Conservative ceiling: if bot-holder data still unavailable after retries, assume worst-case
+      const CONSERVATIVE_BOT_CEILING = 35;
+      const botPct = botPctRaw != null ? botPctRaw : (maxBotHoldersPct != null ? CONSERVATIVE_BOT_CEILING : null);
       if (
         botPct != null &&
         maxBotHoldersPct != null &&
         botPct > maxBotHoldersPct
       ) {
+        const reason = botPctRaw != null
+          ? `bots ${botPctRaw}% > ${maxBotHoldersPct}%`
+          : `bot-holder data unavailable (conservative ${CONSERVATIVE_BOT_CEILING}% assumed)`;
         log(
           "screening",
-          `Bot-holder filter: dropped ${pool.name} — bots ${botPct}% > ${maxBotHoldersPct}%`,
+          `Bot-holder filter: dropped ${pool.name} — ${reason}`,
         );
         filteredOut.push({
           name: pool.name,
-          reason: `bot holders ${botPct}% > ${maxBotHoldersPct}%`,
+          reason: `bot holders ${reason}`,
         });
         return false;
       }
@@ -2172,12 +2205,30 @@ async function deployLatestCandidate(index) {
       mint ? getTokenNarrative({ mint }) : Promise.resolve(null),
       mint ? getTokenInfo({ query: mint }) : Promise.resolve(null),
     ]);
+    let ti = tokenInfo.status === "fulfilled" ? tokenInfo.value?.results?.[0] : null;
+    // Retry bot-holder data if missing (network blip protection)
+    if (ti?.audit?.bot_holders_pct == null && mint) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        log("screening", `Retry ${attempt}/2 bot-holder data for ${candidate.name} (manual deploy)`);
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+        try {
+          const retryResult = await getTokenInfo({ query: mint });
+          const retryTi = retryResult?.results?.[0];
+          if (retryTi?.audit?.bot_holders_pct != null) {
+            ti = retryTi;
+            log("screening", `Retry succeeded for ${candidate.name} — bots ${retryTi.audit.bot_holders_pct}%`);
+            break;
+          }
+        } catch (e) {
+          log("screening", `Retry ${attempt} failed for ${candidate.name}: ${e.message}`);
+        }
+      }
+    }
     const context = {
       pool: candidate,
       sw: smartWallets.status === "fulfilled" ? smartWallets.value : null,
       n: narrative.status === "fulfilled" ? narrative.value : null,
-      ti:
-        tokenInfo.status === "fulfilled" ? tokenInfo.value?.results?.[0] : null,
+      ti,
     };
     const skipReason = getLoneCandidateSkipReason(context);
     if (skipReason) {
