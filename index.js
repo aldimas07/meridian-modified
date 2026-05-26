@@ -1321,13 +1321,14 @@ Summarize the current portfolio health, total fees earned, and performance of al
             }
             continue;
           }
+          const isUrgent = exit.action === "STOP_LOSS" || exit.action === "TRAILING_TP";
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
-          if (sinceLastTrigger >= cooldownMs) {
+          if (isUrgent || sinceLastTrigger >= cooldownMs) {
             _pollTriggeredAt = Date.now();
             log(
               "state",
-              `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`,
+              `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management${isUrgent ? " (URGENT, cooldown bypassed)" : ""}`,
             );
             runManagementCycle({ silent: true }).catch((e) =>
               log(
@@ -1345,13 +1346,14 @@ Summarize the current portfolio health, total fees earned, and performance of al
         }
         const closeRule = getDeterministicCloseRule(p, config.management);
         if (closeRule) {
+          const isUrgent = closeRule.rule <= 2; // Rule 1: stop loss, Rule 2: take profit
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
-          if (sinceLastTrigger >= cooldownMs) {
+          if (isUrgent || sinceLastTrigger >= cooldownMs) {
             _pollTriggeredAt = Date.now();
             log(
               "state",
-              `[PnL poll] Deterministic close rule: ${p.pair} — Rule ${closeRule.rule}: ${closeRule.reason} — triggering management`,
+              `[PnL poll] Deterministic close rule: ${p.pair} — Rule ${closeRule.rule}: ${closeRule.reason} — triggering management${isUrgent ? " (URGENT, cooldown bypassed)" : ""}`,
             );
             runManagementCycle({ silent: true }).catch((e) =>
               log(
